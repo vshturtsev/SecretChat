@@ -3,11 +3,71 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <chrono>
 #include <unistd.h>
 
 #include <cstring>
+#include <string>
 #include <iostream>
+#include <list>
+#include <utility>
 
+#include "include/nlohmann_json.hpp"
+
+class MessageData;
+
+using json = nlohmann::json;
+using Timepoint = std::chrono::system_clock::time_point;
+using Message = std::pair<Timepoint, MessageData>;
+using ChatHistory = std::list<Message>;
+
+std::string timePointToString(const std::chrono::system_clock::time_point& tp) {
+  // Конвертируем в time_t (секунды с эпохи Unix)
+  std::time_t time = std::chrono::system_clock::to_time_t(tp);
+  
+  // Преобразуем в структуру tm (UTC или локальное время)
+  // std::tm tm = *std::gmtime(&time);  // Для UTC используйте gmtime
+  std::tm tm = *std::localtime(&time);  // Для локального времени
+
+  // Форматируем в строку (например, "2024-05-10 14:30:00")
+  std::ostringstream oss;
+  oss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
+  return oss.str();
+}
+
+// // Хешер для time_point (преобразует в наносекунды)
+// struct TimepointHash {
+//   size_t operator()(const Timepoint& tp) const {
+//       return std::chrono::duration_cast<std::chrono::nanoseconds>(
+//           tp.time_since_epoch()
+//       ).count();
+//   }
+// };
+
+
+class MessageData {
+  public:
+  std::string content;
+  int sender_id;
+
+    
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE(MessageData, content, sender_id);
+};
+
+void print_chat(ChatHistory chat) {
+  std::cout << "Chat History:\n";
+  for(auto it = chat.begin(); it != chat.end(); ++it) {
+    std::cout << timePointToString(it->first) << " (user " << it->second.sender_id << "):\n";
+    std::cout << it->second.content << '\n' << std::endl;
+  }
+  // std::cout << "\n";
+}
+void print_message(Message msg) {
+    std::cout << timePointToString(msg.first) << " (user " << msg.second.sender_id << "):\n";
+    std::cout << msg.second.content << '\n' << std::endl;
+
+  // std::cout << "\n";
+}
 
 constexpr int DEFAULT_PORT = 9090;
 constexpr int MAX_EVENTS = 10;
@@ -50,6 +110,9 @@ int main(int argc, char *argv[]) {
   event.data.fd = srv_sock;
   epoll_ctl(epoll_fd, EPOLL_CTL_ADD, srv_sock, &event);
 
+  //chat history via unordered_map
+  ChatHistory chat;
+
   while (1) {
     int n_ready = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
 
@@ -61,6 +124,7 @@ int main(int argc, char *argv[]) {
         epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_client, &event);
       } else {
         char buffer[1024] = {0};
+        
         int bytes = recv(events[i].data.fd, buffer, sizeof(buffer), 0);
         if (bytes <= 0) {
           epoll_ctl(epoll_fd, EPOLL_CTL_DEL, events[i].data.fd, nullptr);
@@ -74,6 +138,13 @@ int main(int argc, char *argv[]) {
             perror("Send failed");
             break;
           }
+          auto received_json = json::parse(buffer);
+          MessageData msg_data = received_json.get<MessageData>();
+          Timepoint now = std::chrono::system_clock::now();
+          Message msg{now, msg_data};
+          chat.push_back(msg);
+          
+          print_chat(chat);
         }
       }
     }

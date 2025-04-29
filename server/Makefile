@@ -15,6 +15,9 @@ $(OBJ_DIR)/%.o: %.cpp
 
 .PHONY: runserver clean killserver clang
 
+test_client:
+	$(CC) client_test/client_test.cpp -o client
+
 clang:
 	clang-format-18 -i *.cpp
 

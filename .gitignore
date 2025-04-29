@@ -30,3 +30,12 @@
 *.exe
 *.out
 *.app
+
+
+#custom
+*.log
+**/bin/
+**/obj/
+/remote_srv/
+test.cpp
+/.vscode/
