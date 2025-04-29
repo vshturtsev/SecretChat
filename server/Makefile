@@ -1,0 +1,29 @@
+CC = g++
+CFLAGS =
+
+BIN_DIR = bin
+OBJ_DIR = obj
+
+all: main
+
+main: main.cpp
+	$(CC) $^ -o $(BIN_DIR)/server
+
+$(OBJ_DIR)/%.o: %.cpp
+	$(CC) -c -o $@ $< $(CFLAGS)
+
+
+.PHONY: runserver clean killserver clang
+
+clang:
+	clang-format-18 -i *.cpp
+
+killserver:
+	killall server
+
+runserver:
+	@echo "Start server"
+	@nohup $(BIN_DIR)/server > server.log 2>&1 &
+
+clean:
+	rm -r $(OBJ_DIR)/*.o
