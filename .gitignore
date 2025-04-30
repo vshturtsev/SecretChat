@@ -40,3 +40,5 @@
 /remote_srv/
 test.cpp
 /.vscode/
+/server/client_test/
+/server/bin/
