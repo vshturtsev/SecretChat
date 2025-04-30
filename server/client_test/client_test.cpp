@@ -1,19 +1,17 @@
-#include <arpa/inet.h>
-#include <netinet/in.h>
 #include <sys/socket.h>
-#include <unistd.h>
-
-#include <cstring>
-#include <iostream>
+#include <string_view>
 #include <system_error>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <optional>
+#include <iostream>
+#include <nlohmann/json.hpp>
+#include <cstring>
+#include <thread>
+#include <atomic>
 
-#include "../include/nlohmann_json.hpp"
 using json = nlohmann::json;
 
-// #define HOST "217.171.146.254"
-#define HOST "127.0.0.1"
-
-#define PORT 9095  // get by cl
 #define USER_ID 123456  // get by cl
 
 class MessageData {
@@ -24,56 +22,106 @@ class MessageData {
   NLOHMANN_DEFINE_TYPE_INTRUSIVE(MessageData, content, sender_id);
 };
 
-int main(int argc, char *argv[]) {
-  int sock = 0;
-  struct sockaddr_in srv_addr = {};
-  if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-    perror("Socket failed.");
-    exit(EXIT_FAILURE);
-  }
+struct Config {
+    std::string_view ip;
+    uint16_t port;
+};
 
-  srv_addr.sin_family = AF_INET;
-  srv_addr.sin_port = htons(PORT);
 
-  if (inet_pton(AF_INET, HOST, &srv_addr.sin_addr) <= 0) {
-    throw std::system_error(errno, std::system_category(), "invalid adress");
-  }
+bool translate_addres(const Config& config, sockaddr_in& address) {
+       
+    inet_pton(AF_INET, config.ip.data(), &address.sin_addr);
+    address.sin_port = htons(config.port);
+    return true;
+}
+        
 
-  if (connect(sock, (struct sockaddr *)&srv_addr, sizeof(srv_addr)) < 0) {
-    throw std::system_error(errno, std::system_category(), "cannot connect");
-  }
-
-  int test = 5;
-  while (--test) {
-    std::string user_input;
-    // std::cout << "Input message to send: (or '-exit' for finish):";
-    std::getline(std::cin, user_input);
-
-    if (user_input == "-exit") break;
-
-    if (user_input.size() == 0) {
-      std::cout << "You need to input text" << std::endl;
-      continue;
+class Client {
+    Config config {
+        // .ip = "217.171.146.254",
+        .ip = "127.0.0.1",
+        .port = 9090
+    };
+    
+    sockaddr_in addres;
+    std::atomic<bool> connected;
+    int create_socket() {
+        if (!translate_addres(config, addres)) {
+            perror("failed translate address to networ format");
+            return -1;
+        }
+        addres.sin_family = AF_INET;
+        int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (fd < 0) {
+            perror("failed create socket");
+        }
+        return fd;
     }
-
-    MessageData msg = {user_input, USER_ID};
-    std::string json_str = json(msg).dump();
-
-    ssize_t bytes_sent = send(sock, json_str.c_str(), json_str.size(), 0);
-    if (bytes_sent < 0) {
-      std::cerr << "Send error: " << strerror(errno) << std::endl;
-      break;
+    int connect() {
+        int fd = create_socket();
+        if (fd < 0)
+            return -1;
+        int result = ::connect(fd, reinterpret_cast<sockaddr*>(&addres), sizeof(addres));
+        if (result) {
+            perror("failed connect server");
+            return -1;
+        }
+        return fd;
     }
-    // std::cout << "Bytes sent: " << bytes_sent << std::endl;
-
-    char response[1024] = {0};
-    ssize_t bytes_received = recv(sock, response, sizeof(response), 0);
-    if (bytes_sent <= 0) {
-      std::cerr << "No response from server" << strerror(errno) << std::endl;
-      break;
+    int send_message(int fd, std::string& message) {
+        
+        MessageData msg = {message, USER_ID};
+        std::string json_str = json(msg).dump();
+        if (!connected) return 0;
+        ssize_t sent = send(fd, json_str.data(), json_str.size(), MSG_NOSIGNAL);
+        if (sent < 0) {
+            if (errno == EPIPE) {
+                std::cout << "server disconnect: send" << '\n';
+                return 0;
+            }
+            perror("faild send to server");
+            return -1;
+        }
+        return 1;
     }
-    std::cout << "Response from server:\n" << response << std::endl;
-  }
+    void read_broadcast(int fd) {
+        std::string buffer;
+        buffer.resize(1024);
+        while (1) {
+            ssize_t receive = recv(fd, buffer.data(), buffer.size(), 0);
+            if (receive == 0) {
+                connected = false;
+                return;
+            }
+            if (receive < 0) {
+                perror("failed read to server");
+                return;
+            }
+            std::cout << buffer << "\n";
+        }
+    }
+public:
+    void run()
+    {
+        int fd = connect();
+        if (fd < 0) return;
+        connected = true;
+        std::thread t([&,this]{ read_broadcast(fd); });
+        std::string msg;
+        while (std::getline(std::cin, msg)) {
+            if (send_message(fd, msg) <= 0) {
+                std::cout << "close connection" << "\n";
+                break;
+            }
+        }
+        t.join();
+    }
+};
 
-  close(sock);
+
+int main(int argc, char const *argv[])
+{
+    Client cli;
+    cli.run();
+    return 0;
 }
