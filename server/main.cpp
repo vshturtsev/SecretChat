@@ -11,7 +11,7 @@
 #include <iostream>
 #include <list>
 #include <utility>
-
+#include <unordered_set>
 #include "include/nlohmann_json.hpp"
 
 class MessageData;
@@ -73,6 +73,27 @@ constexpr int DEFAULT_PORT = 9090;
 constexpr int MAX_EVENTS = 10;
 constexpr int BACKLOG = 10;
 
+
+void broadcast_message(std::unordered_set<int> clients, int author_of_msg, char *msg) {
+  for (int client_fd : clients) {
+    if (author_of_msg != client_fd) {
+      if (send(client_fd, msg, strlen(msg), 0) < 0) {
+        perror("Error send msg!\n");
+      }
+    }
+  }
+}
+
+void proccess_message(const char *buffer, ChatHistory& chat) {
+  auto received_json = json::parse(buffer);
+  MessageData msg_data = received_json.get<MessageData>();
+  Timepoint now = std::chrono::system_clock::now();
+  Message msg{now, msg_data};
+  chat.push_back(msg);
+  print_chat(chat);
+}
+
+
 int main(int argc, char *argv[]) {
   int srv_sock;
   int new_sock;
@@ -112,45 +133,43 @@ int main(int argc, char *argv[]) {
 
   //chat history via unordered_map
   ChatHistory chat;
-
+  std::unordered_set<int> clients;
   while (1) {
     int n_ready = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
 
     for (int i = 0; i < n_ready; ++i) {
+      std::cout << n_ready << "\n";
       if (events[i].data.fd == srv_sock) {
         int new_client = accept(srv_sock, nullptr, nullptr);
         event.events = EPOLLIN | EPOLLET;
         event.data.fd = new_client;
+        clients.insert(new_client);
         epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_client, &event);
       } else {
         char buffer[1024] = {0};
         
         int bytes = recv(events[i].data.fd, buffer, sizeof(buffer), 0);
         if (bytes <= 0) {
+          std::cout << "close client" << '\n';
           epoll_ctl(epoll_fd, EPOLL_CTL_DEL, events[i].data.fd, nullptr);
           close(events[i].data.fd);
+          clients.erase(events[i].data.fd);
         } else {
           std::cout << "Received request(" << bytes << " bytes): \n"
                     << buffer << std::endl;
-
-          const char *response = "Message received\n";
-          if (send(events[i].data.fd, response, strlen(response), 0) < 0) {
-            perror("Send failed");
-            break;
-          }
-          auto received_json = json::parse(buffer);
-          MessageData msg_data = received_json.get<MessageData>();
-          Timepoint now = std::chrono::system_clock::now();
-          Message msg{now, msg_data};
-          chat.push_back(msg);
-          
-          print_chat(chat);
+          // const char *response = "Message received\n";
+          // if (send(events[i].data.fd, response, strlen(response), 0) < 0) {
+          //   perror("Send failed");
+          //   break;
+          // }
+          broadcast_message(clients, events[i].data.fd, buffer);
+          proccess_message(buffer, chat);          
         }
       }
     }
+ 
   }
   close(epoll_fd);
   close(srv_sock);
-
   return 0;
 }
