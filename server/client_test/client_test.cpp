@@ -13,7 +13,7 @@ using json = nlohmann::json;
 // #define HOST "217.171.146.254"
 #define HOST "127.0.0.1"
 
-#define PORT 9090  // get by cl
+#define PORT 9095  // get by cl
 #define USER_ID 123456  // get by cl
 
 class MessageData {
@@ -72,7 +72,7 @@ int main(int argc, char *argv[]) {
       std::cerr << "No response from server" << strerror(errno) << std::endl;
       break;
     }
-    // std::cout << "Response from server:\n" << response << std::endl;
+    std::cout << "Response from server:\n" << response << std::endl;
   }
 
   close(sock);
