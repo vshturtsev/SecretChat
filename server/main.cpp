@@ -68,16 +68,6 @@ void print_message(Message msg) {
     std::cout << msg.second.content << '\n' << std::endl;
 }
 
-void broadcast_message(std::unordered_set<int> clients, int author_of_msg, char *msg) {
-  for (int client_fd : clients) {
-    if (author_of_msg != client_fd) {
-      if (send(client_fd, msg, strlen(msg), 0) < 0) {
-        perror("Error send msg!\n");
-      }
-    }
-  }
-}
-
 void proccess_message(const char *buffer, ChatHistory& chat) {
   auto received_json = json::parse(buffer);
   MessageData msg_data = received_json.get<MessageData>();
@@ -87,85 +77,135 @@ void proccess_message(const char *buffer, ChatHistory& chat) {
   print_chat(chat);
 }
 
-
-constexpr int DEFAULT_PORT = 9095;
-constexpr int MAX_EVENTS = 10;
 constexpr int BACKLOG = 10;
+constexpr int MAX_EVENTS = 10;
 
-int main(int argc, char *argv[]) {
-  int srv_sock;
-  int new_sock;
-  int epoll_fd = epoll_create1(0);
-  struct epoll_event event, events[MAX_EVENTS];
-
-  if ((srv_sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-    perror("Socket creating failed.");
-    exit(EXIT_FAILURE);
-  }
-
-  struct sockaddr_in srv_addr = {};
-  // memset(&srv_addr, 0, sizeof(srv_addr));
-  srv_addr.sin_addr.s_addr = INADDR_ANY;
-  srv_addr.sin_family = AF_INET;
-  srv_addr.sin_port = htons(DEFAULT_PORT);
-
-  int opt = 1;
-  if (setsockopt(srv_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-    perror("setcokopt(SO_REUSEADDR) failed");
-  }
-
-  if (bind(srv_sock, (struct sockaddr *)&srv_addr, sizeof(srv_addr)) < 0) {
-    perror("Binding failed.");
-    exit(EXIT_FAILURE);
-  }
-
-  if (listen(srv_sock, BACKLOG) == 0) {
-    std::cout << "Server ready. Listening on port " << DEFAULT_PORT << std::endl;
-  } else {
-    perror("Listening failed.");
-  }
-
-  event.events = EPOLLIN;
-  event.data.fd = srv_sock;
-  epoll_ctl(epoll_fd, EPOLL_CTL_ADD, srv_sock, &event);
-  
-  std::unordered_set<int> clients;
-  
-  //chat history via unordered_map
-  ChatHistory chat;
-
-  while (1) {
-    int n_ready = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
-
-    for (int i = 0; i < n_ready; ++i) {
-      if (events[i].data.fd == srv_sock) {
-        int new_client = accept(srv_sock, nullptr, nullptr);
-        event.events = EPOLLIN | EPOLLET;
-        event.data.fd = new_client;
-        epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_client, &event);
-        clients.insert(new_client);
-
-      } else {
-        char buffer[1024] = {0};
-        
-        int bytes = recv(events[i].data.fd, buffer, sizeof(buffer), 0);
-        if (bytes <= 0) {
-          epoll_ctl(epoll_fd, EPOLL_CTL_DEL, events[i].data.fd, nullptr);
-          close(events[i].data.fd);
-          clients.erase(events[i].data.fd);
-        
-        } else {
-          std::cout << "Received request(" << bytes << " bytes): \n"
-                    << buffer << std::endl;
-
-          broadcast_message(clients, events[i].data.fd, buffer);
-          proccess_message(buffer, chat);          
+class Server {
+    int fd;
+    
+public:
+    Server() {
+        fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (fd < 0){
+            perror("Failed error create socket");
+            exit(EXIT_FAILURE);
         }
-      }
     }
-  }
-  close(epoll_fd);
-  close(srv_sock);
+    ~Server() {
+        close(fd);
+    }
 
-  return 0;
+    int get_fd(void) const { return fd; }
+
+    void start_listen(int port) {
+        struct sockaddr_in srv_addr = {};
+        srv_addr.sin_addr.s_addr = INADDR_ANY;
+        srv_addr.sin_family = AF_INET;
+        srv_addr.sin_port = htons(port);
+        int opt = 1;
+        if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+          perror("setcokopt(SO_REUSEADDR) failed");
+        }
+      
+        if (bind(fd, (struct sockaddr *)&srv_addr, sizeof(srv_addr)) < 0) {
+          perror("Binding failed.");
+          exit(EXIT_FAILURE);
+        }
+      
+        if (listen(fd, BACKLOG) == 0) {
+          std::cout << "Server ready. Listening on port " << port << std::endl;
+        } else {
+          perror("Listening failed.");
+          exit(EXIT_FAILURE);
+        }
+    }
+
+};
+
+class ClientPool {
+    int epoll_fd;
+    std::unordered_set<int> clients;
+    struct epoll_event event, ev_list[MAX_EVENTS];
+
+public:
+    ClientPool(int serv_fd) {
+        epoll_fd = epoll_create1(0);
+        event.events = EPOLLIN;
+        event.data.fd = serv_fd;
+        epoll_ctl(epoll_fd, EPOLL_CTL_ADD, serv_fd, &event);
+    }
+    ~ClientPool() {
+        close(epoll_fd);
+    }
+
+    void add_event(int fd) {
+        event.events = EPOLLIN | EPOLLET;
+        event.data.fd = fd;
+        epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &event);
+    }
+
+    int get_ready_events(void) {
+        return epoll_wait(epoll_fd, ev_list, MAX_EVENTS, -1);
+    }
+
+    void delete_event(int index) {
+        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, ev_list[index].data.fd, &event);
+    }
+
+    void append_client(int fd) {
+        clients.insert(fd);
+    }
+
+    void delete_client(int index) {
+        clients.erase(ev_list[index].data.fd);
+    }
+
+    void broadcast_message(int index_of_author, char *msg) {
+        for (int client_fd : clients) {
+            if (ev_list[index_of_author].data.fd != client_fd) {
+                if (send(client_fd, msg, strlen(msg), 0) < 0) {
+                    perror("Error send message.");
+                }
+            }
+        }
+    }
+
+    struct epoll_event& get_item_by_index(int index) {
+        return ev_list[index];
+    }
+};
+
+int main(void) {
+    // if (fopen("config.txt"))
+    // else {
+    //     take_args(); // scanf();
+    // }
+    Server server;
+    server.start_listen(9090);
+    ClientPool pool(server.get_fd());
+    ChatHistory chat;
+    while (true) {
+        int ready_fd = pool.get_ready_events();
+        for (int i = 0; i < ready_fd; i++) {
+            if (pool.get_item_by_index(i).data.fd == server.get_fd()) {
+                int new_sock = accept(server.get_fd(), nullptr, nullptr);
+                pool.add_event(new_sock);
+                pool.append_client(new_sock);
+            } else {
+                char buffer[2048];
+                int bytes = recv(pool.get_item_by_index(i).data.fd, buffer, sizeof(buffer), 0);
+                if (bytes <= 0) {
+                    pool.delete_event(i);
+                    pool.delete_client(i);
+                
+                } else {
+                    std::cout << "Received request(" << bytes << " bytes): \n"
+                    << buffer << std::endl;
+                    pool.broadcast_message(i, buffer);
+                    // proccess_message(buffer, chat);
+                }
+            }
+        }
+    }
+    return 0;
 }
