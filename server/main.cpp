@@ -122,9 +122,11 @@ public:
 
 };
 
+class ClientSession;
+
 class ClientPool {
     int epoll_fd;
-    std::unordered_set<int> clients;
+    std::unordered_set<ClientSession> clients;
     struct epoll_event event, ev_list[MAX_EVENTS];
 
 public:
@@ -152,8 +154,8 @@ public:
         epoll_ctl(epoll_fd, EPOLL_CTL_DEL, ev_list[index].data.fd, &event);
     }
 
-    void append_client(int fd) {
-        clients.insert(fd);
+    void append_client(ClientSession client) {
+        clients.insert(client);
     }
 
     void delete_client(int index) {
@@ -175,6 +177,12 @@ public:
     }
 };
 
+class ClientSession {
+  public:
+  int fd;
+  bool auth_status = false;
+}
+
 int main(void) {
     // if (fopen("config.txt"))
     // else {
@@ -189,8 +197,9 @@ int main(void) {
         for (int i = 0; i < ready_fd; i++) {
             if (pool.get_item_by_index(i).data.fd == server.get_fd()) {
                 int new_sock = accept(server.get_fd(), nullptr, nullptr);
+                ClientSession new_client = {new_sock, false};
                 pool.add_event(new_sock);
-                pool.append_client(new_sock);
+                pool.append_client(new_client);
             } else {
                 char buffer[2048];
                 int bytes = recv(pool.get_item_by_index(i).data.fd, buffer, sizeof(buffer), 0);
