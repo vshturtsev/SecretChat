@@ -11,23 +11,34 @@
 #include <atomic>
 
 using json = nlohmann::json;
-
+using std::cout;
 #define USER_ID 123456  // get by cl
-
-class MessageData {
-  public:
-  std::string content;
-  int sender_id;
-    
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE(MessageData, content, sender_id);
-};
 
 struct Config {
     std::string_view ip;
     uint16_t port;
 };
 
+enum struct MsgType {
+    Auth, // authentification
+    Chat, // message to chat
+    Reg,  // registration, first time
+    Ping  //?need this? check connection
+};
+  
+struct [[gnu::packed]] MsgHeader {
+    MsgType type;
+    size_t len;
+};
 
+class Message{
+    public:
+    std::string content;
+    MsgType type;
+      
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(Message, content, type);
+  };
+  
 bool translate_addres(const Config& config, sockaddr_in& address) {
        
     inet_pton(AF_INET, config.ip.data(), &address.sin_addr);
@@ -68,12 +79,52 @@ class Client {
         }
         return fd;
     }
-    int send_message(int fd, std::string& message) {
+    int authentication(int fd) {
+        std::string login = "vova";
+        std::string password = "true";
+        Message message = {
+            .content = login + ":" + password,
+            .type = MsgType::Auth
+        };
         
-        MessageData msg = {message, USER_ID};
-        std::string json_str = json(msg).dump();
+        std::string json_message = json(message).dump();
+        
+        const MsgHeader headers = {
+            .type = message.type,
+            .len = json_message.size()
+        };
+
+        cout << headers.len << " " << sizeof(headers) << "\n";
+        ssize_t sent = send(fd, &headers, sizeof(headers), 0);
+        if (sent != sizeof(headers)) {
+            perror("failed send headers");
+        }
+        int status = send_message(fd, json_message);
+        return status;
+    }
+    int send_chat(int fd, std::string& message) {
+        Message message_chat = {
+            .content = message,
+            .type = MsgType::Chat
+        };
+        std::string json_message = json(message_chat).dump();
+        
+        const MsgHeader headers = {
+            .type = message_chat.type,
+            .len = json_message.size()
+        };
+
+        cout << headers.len << " " << sizeof(headers) << "\n";
+        ssize_t sent = send(fd, &headers, sizeof(headers), 0);
+        if (sent != sizeof(headers)) {
+            perror("failed send headers");
+        }
+        int status = send_message(fd, json_message);
+        return status;
+    }
+    int send_message(int fd, std::string& message) {
         if (!connected) return 0;
-        ssize_t sent = send(fd, json_str.data(), json_str.size(), MSG_NOSIGNAL);
+        ssize_t sent = send(fd, message.data(), message.size(), MSG_NOSIGNAL);
         if (sent < 0) {
             if (errno == EPIPE) {
                 std::cout << "server disconnect: send" << '\n';
@@ -106,10 +157,11 @@ public:
         int fd = connect();
         if (fd < 0) return;
         connected = true;
+        if (!authentication(fd)) return;
         std::thread t([&,this]{ read_broadcast(fd); });
         std::string msg;
         while (std::getline(std::cin, msg)) {
-            if (send_message(fd, msg) <= 0) {
+            if (send_chat(fd, msg) <= 0) {
                 std::cout << "close connection" << "\n";
                 break;
             }

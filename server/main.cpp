@@ -1,4 +1,3 @@
-#include <chrono>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/epoll.h>
@@ -6,6 +5,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <cstring>
 #include <iostream>
 #include <list>
@@ -15,6 +15,7 @@
 #include <utility>
 // #include "include/nlohmann_json.hpp"
 #include <nlohmann/json.hpp>
+#include <thread>
 
 class MessageData;
 
@@ -22,6 +23,7 @@ using json = nlohmann::json;
 using Timepoint = std::chrono::system_clock::time_point;
 using Message = std::pair<Timepoint, MessageData>;
 using ChatHistory = std::list<Message>;
+using std::cout;
 
 std::string timePointToString(const std::chrono::system_clock::time_point &tp) {
   // Конвертируем в time_t (секунды с эпохи Unix)
@@ -29,7 +31,7 @@ std::string timePointToString(const std::chrono::system_clock::time_point &tp) {
 
   // Преобразуем в структуру tm (UTC или локальное время)
   // std::tm tm = *std::gmtime(&time);  // Для UTC используйте gmtime
-  std::tm tm = *std::localtime(&time); // Для локального времени
+  std::tm tm = *std::localtime(&time);  // Для локального времени
 
   // Форматируем в строку (например, "2024-05-10 14:30:00")
   std::ostringstream oss;
@@ -47,7 +49,7 @@ std::string timePointToString(const std::chrono::system_clock::time_point &tp) {
 // };
 
 class MessageData {
-public:
+ public:
   std::string content;
   int sender_id;
 
@@ -57,15 +59,13 @@ public:
 void print_chat(ChatHistory chat) {
   std::cout << "Chat History:\n";
   for (auto it = chat.begin(); it != chat.end(); ++it) {
-    std::cout << timePointToString(it->first) << " (user "
-              << it->second.sender_id << "):\n";
+    std::cout << timePointToString(it->first) << " (user " << it->second.sender_id << "):\n";
     std::cout << it->second.content << '\n' << std::endl;
   }
 }
 
 void print_message(Message msg) {
-  std::cout << timePointToString(msg.first) << " (user " << msg.second.sender_id
-            << "):\n";
+  std::cout << timePointToString(msg.first) << " (user " << msg.second.sender_id << "):\n";
   std::cout << msg.second.content << '\n' << std::endl;
 }
 
@@ -84,7 +84,7 @@ constexpr int MAX_EVENTS = 10;
 class Server {
   int fd;
 
-public:
+ public:
   Server() {
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
@@ -119,16 +119,27 @@ public:
     }
   }
 };
+enum struct MsgType {
+  Auth,  // authentification
+  Chat,  // message to chat
+  Reg,   // registration, first time
+  Ping   //?need this? check connection
+};
+
+
+struct [[gnu::packed]] MsgHeader {
+  MsgType type;
+  size_t len;
+};
+
 
 class ClientSession {
-public:
+ public:
   std::string name;
   bool auth_status = false;
 };
 
-void broadcast_message(int autor_fd,
-                       std::unordered_map<int, ClientSession> clients_pool,
-                       std::string message) {
+void broadcast_message(int autor_fd, std::unordered_map<int, ClientSession> clients_pool, std::string message) {
   for (const auto &[fd, client_session] : clients_pool) {
     if (fd != autor_fd && client_session.auth_status) {
       if (send(fd, message.data(), message.size(), 0) < 0) {
@@ -160,35 +171,61 @@ int main(void) {
 
   while (true) {
     int ready_fd = epoll_wait(epoll_fd, ev_list, MAX_EVENTS, -1);
+    cout << "client ready: " << ready_fd << "\n";
     for (int i = 0; i < ready_fd; i++) {
       if (ev_list[i].data.fd == serv_fd) {
         int new_sock = accept(server.get_fd(), nullptr, nullptr);
-        clients_pool.emplace(new_sock, ClientSession{"name", false});
+        cout << "connected: " << new_sock << "\n";
+        clients_pool.emplace(new_sock, ClientSession{"", false});
         event.events = EPOLLIN | EPOLLET;
         event.data.fd = new_sock;
         epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_sock, &event);
 
       } else {
-        std::string buffer;
-        buffer.resize(2048);
-        int client_fd = ev_list[i].data.fd;
-        auto it = clients_pool.find(client_fd);
-        if (it != clients_pool.end()) {
-          if (it->second.auth_status) {
-            int bytes = recv(client_fd, buffer.data(), buffer.size(), 0);
-            if (bytes <= 0) {
-              epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, &event);
-              clients_pool.erase(client_fd);
-            } else {
-              std::cout << "Received request(" << bytes << " bytes): \n"
-                        << buffer << std::endl;
-              broadcast_message(client_fd, clients_pool, buffer);
-              // proccess_message(buffer, chat);
-            }
-          } else {
-            // not auth
+
+        int fd = ev_list[i].data.fd;
+        cout << "client session: " << fd << "\n";
+        
+        auto client = clients_pool.find(fd);
+        if (client != clients_pool.end()) {
+          
+          MsgHeader headers = {};
+          ssize_t receive_headers = recv(client->first, &headers, sizeof(headers), MSG_WAITALL);
+          if (receive_headers > 0 && receive_headers != sizeof(headers)) {
+            perror("failed read headers");
+            continue;
           }
-          // clients.erase(ev_list[i].data.fd);
+
+          if (receive_headers <= 0) {
+            cout << "disconnect client\n";
+            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client->first, &event);
+            clients_pool.erase(client->first);
+          
+          } else {
+            
+            std::string buffer;
+            buffer.resize(headers.len + 1);
+
+            ssize_t receive_messsage = recv(client->first, buffer.data(), headers.len, MSG_WAITALL);
+
+            switch (headers.type) {
+              case MsgType::Auth:
+                client->second.auth_status = true;
+                std::cout << "Auth request(" << receive_messsage << " bytes): \n" << buffer << std::endl;
+                break;
+              
+              case MsgType::Chat:
+                if (client->second.auth_status) {
+                  cout << "Received request(" << receive_messsage << " bytes): \n" << buffer << std::endl;
+                  broadcast_message(client->first, clients_pool, buffer);
+                } else {
+                  cout << "not auth\n";
+                }
+                break;
+              
+              default:break;
+            }
+          }
         }
       }
     }
