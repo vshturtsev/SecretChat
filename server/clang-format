@@ -1,0 +1,9 @@
+Language: Cpp
+BasedOnStyle: LLVM
+
+ColumnLimit: 120
+AlwaysBreakTemplateDeclarations: Yes
+# BreakBeforeBinaryOperators: None
+# AlignOperands: DontAlign
+# BinPackArguments: true
+# BinPackParameters: true

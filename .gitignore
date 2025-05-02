@@ -42,3 +42,4 @@ test.cpp
 /.vscode/
 /server/client_test/
 /server/bin/
+test_main.cpp

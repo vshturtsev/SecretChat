@@ -19,7 +19,7 @@ test_client:
 	$(CC) client_test/client_test.cpp -o client
 
 clang:
-	clang-format-18 -i *.cpp
+	clang-format-18 -i *.cpp *.hpp
 
 killserver:
 	killall server
