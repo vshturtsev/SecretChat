@@ -127,6 +127,7 @@ class Client {
             // std::cout << buffer << std::endl;
             ChatMessage chat_msg = MessageService::from_string<ChatMessage>(buffer);
             std::cout << chat_msg.get_display_view().str() << std::endl;
+            buffer.clear();
         }
     }
 public:

@@ -94,6 +94,7 @@ class ClientSession {
 };
 
 void broadcast_message(int autor_fd, std::unordered_map<int, ClientSession> clients_pool, std::string message) {
+  // std::cout << "broadcast: " << message << std::endl;
   for (const auto &[fd, client_session] : clients_pool) {
     if (fd != autor_fd && client_session.auth_status) {
       if (send(fd, message.data(), message.size(), 0) < 0) {
@@ -169,9 +170,10 @@ int main(void) {
                   Message restore_msg = MessageService::from_string<Message>(buffer);
                   ChatMessage chat_msg(std::move(restore_msg), client->second.name);
                   // ChatMessage chat_msg(std::move(restore_msg), "CLIENT_NAME");
-                  // chat_msg.update_time();
-                  // cout << chat_msg.get_display_view().str(); // TEST
+                  chat_msg.update_time();
+                  // cout << chat_msg.get_display_view().str() << "\n"; // TEST
                   std::string new_msg = MessageService::to_string(chat_msg);
+                  // cout << new_msg << std::endl;
                   broadcast_message(client->first, clients_pool, new_msg);
                 } else {
                   cout << "not auth\n";
