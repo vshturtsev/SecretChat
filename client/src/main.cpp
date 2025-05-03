@@ -10,6 +10,9 @@
 #include <thread>
 #include <atomic>
 
+// #include <sys/time.h>
+#include "../../common/message_data.hpp"
+
 using json = nlohmann::json;
 using std::cout;
 #define USER_ID 123456  // get by cl
@@ -19,28 +22,7 @@ struct Config {
     uint16_t port;
 };
 
-enum struct MsgType {
-    Auth, // authentification
-    Chat, // message to chat
-    Reg,  // registration, first time
-    Ping  //?need this? check connection
-};
-  
-struct [[gnu::packed]] MsgHeader {
-    MsgType type;
-    size_t len;
-};
-
-class Message{
-    public:
-    std::string content;
-    MsgType type;
-      
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(Message, content, type);
-  };
-  
-bool translate_addres(const Config& config, sockaddr_in& address) {
-       
+bool translate_addres(const Config& config, sockaddr_in& address) {       
     inet_pton(AF_INET, config.ip.data(), &address.sin_addr);
     address.sin_port = htons(config.port);
     return true;
@@ -82,15 +64,12 @@ class Client {
     int authentication(int fd) {
         std::string login = "vova";
         std::string password = "true";
-        Message message = {
-            .content = login + ":" + password,
-            .type = MsgType::Auth
-        };
+        Message message (MsgType::Auth, login + ":" + password);
         
-        std::string json_message = json(message).dump();
+        std::string json_message = MessageService::to_string(message);
         
         const MsgHeader headers = {
-            .type = message.type,
+            .type = message.get_type(),
             .len = json_message.size()
         };
 
@@ -103,14 +82,11 @@ class Client {
         return status;
     }
     int send_chat(int fd, std::string& message) {
-        Message message_chat = {
-            .content = message,
-            .type = MsgType::Chat
-        };
-        std::string json_message = json(message_chat).dump();
+        Message message_chat (MsgType::Chat, message);
+        std::string json_message =  MessageService::to_string(message_chat);
         
         const MsgHeader headers = {
-            .type = message_chat.type,
+            .type = message_chat.get_type(),
             .len = json_message.size()
         };
 
@@ -148,7 +124,9 @@ class Client {
                 perror("failed read to server");
                 return;
             }
-            std::cout << buffer << "\n";
+            // std::cout << buffer << std::endl;
+            ChatMessage chat_msg = MessageService::from_string<ChatMessage>(buffer);
+            std::cout << chat_msg.get_display_view().str() << std::endl;
         }
     }
 public:

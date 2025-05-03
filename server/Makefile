@@ -6,6 +6,9 @@ OBJ_DIR = obj
 
 all: main
 
+client: ../client/src/main.cpp
+	$(CC) $^ -o $(BIN_DIR)/client
+
 main: main.cpp
 	$(CC) $^ -o $(BIN_DIR)/server
 

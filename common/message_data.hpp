@@ -12,10 +12,9 @@ enum class MsgType {
   Ping  //?need this? check connection
 };
 
-class MsgHeader {
-public:
+struct [[gnu::packed]] MsgHeader {
   MsgType type;
-  int len;
+  size_t len;
 };
 
 class Message {
@@ -27,6 +26,7 @@ protected:
 public:
   NLOHMANN_DEFINE_TYPE_INTRUSIVE(Message, type, content, msg_time);
   Message() = default;
+  // Message(Message&&) = default; 
   Message(MsgType _type, std::string _content)
       : type(_type), content(_content) {
     time(&msg_time);
@@ -34,6 +34,9 @@ public:
   const MsgType &get_type() const { return type; }
   const std::string &get_content() const { return content; }
   const time_t &get_time() const { return msg_time; }
+  void update_time() {
+    time(&msg_time);
+  }
 };
 
 class ChatMessage : public Message {
@@ -41,7 +44,7 @@ protected:
   std::string sender_name;
 
 public:
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE(ChatMessage, sender_name);
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE(ChatMessage, type, content, msg_time, sender_name);
   ChatMessage() = default;
   ChatMessage(Message &&base_msg) : Message(std::move(base_msg)) {}
   ChatMessage(Message &&base_msg, const std::string &_name)
@@ -54,7 +57,7 @@ public:
     std::ostringstream oss;
     oss << sender_name << " "
         << std::put_time(std::localtime(&msg_time), "%Y-%m-%d %H:%M:%S:\n")
-        << content << std::endl;
+        << content;// << std::endl;
     return oss;
   }
 };

@@ -13,70 +13,37 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
-// #include "include/nlohmann_json.hpp"
 #include <nlohmann/json.hpp>
 #include <thread>
 
-class MessageData;
+#include "../common/message_data.hpp"
+
+// class MessageData;
 
 using json = nlohmann::json;
-using Timepoint = std::chrono::system_clock::time_point;
-using Message = std::pair<Timepoint, MessageData>;
+// using Timepoint = std::chrono::system_clock::time_point;
+// using Message = std::pair<Timepoint, MessageData>;
 using ChatHistory = std::list<Message>;
 using std::cout;
 
-std::string timePointToString(const std::chrono::system_clock::time_point &tp) {
-  // Конвертируем в time_t (секунды с эпохи Unix)
-  std::time_t time = std::chrono::system_clock::to_time_t(tp);
 
-  // Преобразуем в структуру tm (UTC или локальное время)
-  // std::tm tm = *std::gmtime(&time);  // Для UTC используйте gmtime
-  std::tm tm = *std::localtime(&time);  // Для локального времени
 
-  // Форматируем в строку (например, "2024-05-10 14:30:00")
-  std::ostringstream oss;
-  oss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
-  return oss.str();
-}
-
-// // Хешер для time_point (преобразует в наносекунды)
-// struct TimepointHash {
-//   size_t operator()(const Timepoint& tp) const {
-//       return std::chrono::duration_cast<std::chrono::nanoseconds>(
-//           tp.time_since_epoch()
-//       ).count();
+// void print_chat(ChatHistory chat) {
+//   std::cout << "Chat History:\n";
+//   for (auto it = chat.begin(); it != chat.end(); ++it) {
+//     std::cout << timePointToString(it->first) << " (user " << it->second.sender_id << "):\n";
+//     std::cout << it->second.content << '\n' << std::endl;
 //   }
-// };
+// }
 
-class MessageData {
- public:
-  std::string content;
-  int sender_id;
-
-  NLOHMANN_DEFINE_TYPE_INTRUSIVE(MessageData, content, sender_id);
-};
-
-void print_chat(ChatHistory chat) {
-  std::cout << "Chat History:\n";
-  for (auto it = chat.begin(); it != chat.end(); ++it) {
-    std::cout << timePointToString(it->first) << " (user " << it->second.sender_id << "):\n";
-    std::cout << it->second.content << '\n' << std::endl;
-  }
-}
-
-void print_message(Message msg) {
-  std::cout << timePointToString(msg.first) << " (user " << msg.second.sender_id << "):\n";
-  std::cout << msg.second.content << '\n' << std::endl;
-}
-
-void proccess_message(const char *buffer, ChatHistory &chat) {
-  auto received_json = json::parse(buffer);
-  MessageData msg_data = received_json.get<MessageData>();
-  Timepoint now = std::chrono::system_clock::now();
-  Message msg{now, msg_data};
-  chat.push_back(msg);
-  print_chat(chat);
-}
+// void proccess_message(const char *buffer, ChatHistory &chat) {
+//   auto received_json = json::parse(buffer);
+//   MessageData msg_data = received_json.get<MessageData>();
+//   Timepoint now = std::chrono::system_clock::now();
+//   Message msg{now, msg_data};
+//   chat.push_back(msg);
+//   print_chat(chat);
+// }
 
 constexpr int BACKLOG = 10;
 constexpr int MAX_EVENTS = 10;
@@ -119,19 +86,6 @@ class Server {
     }
   }
 };
-enum struct MsgType {
-  Auth,  // authentification
-  Chat,  // message to chat
-  Reg,   // registration, first time
-  Ping   //?need this? check connection
-};
-
-
-struct [[gnu::packed]] MsgHeader {
-  MsgType type;
-  size_t len;
-};
-
 
 class ClientSession {
  public:
@@ -182,47 +136,47 @@ int main(void) {
         epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_sock, &event);
 
       } else {
-
         int fd = ev_list[i].data.fd;
-        cout << "client session: " << fd << "\n";
-        
+        cout << "client session: " << fd << "\n";        
         auto client = clients_pool.find(fd);
-        if (client != clients_pool.end()) {
-          
+        if (client != clients_pool.end()) {          
           MsgHeader headers = {};
           ssize_t receive_headers = recv(client->first, &headers, sizeof(headers), MSG_WAITALL);
           if (receive_headers > 0 && receive_headers != sizeof(headers)) {
             perror("failed read headers");
             continue;
           }
-
           if (receive_headers <= 0) {
             cout << "disconnect client\n";
             epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client->first, &event);
-            clients_pool.erase(client->first);
-          
-          } else {
-            
+            clients_pool.erase(client->first);          
+          } else {            
             std::string buffer;
-            buffer.resize(headers.len + 1);
+            buffer.resize(headers.len+1);
 
             ssize_t receive_messsage = recv(client->first, buffer.data(), headers.len, MSG_WAITALL);
 
             switch (headers.type) {
               case MsgType::Auth:
                 client->second.auth_status = true;
+                client->second.name = "CLIENT_NAME_TODO";//TODO
                 std::cout << "Auth request(" << receive_messsage << " bytes): \n" << buffer << std::endl;
                 break;
               
               case MsgType::Chat:
                 if (client->second.auth_status) {
                   cout << "Received request(" << receive_messsage << " bytes): \n" << buffer << std::endl;
-                  broadcast_message(client->first, clients_pool, buffer);
+                  Message restore_msg = MessageService::from_string<Message>(buffer);
+                  ChatMessage chat_msg(std::move(restore_msg), client->second.name);
+                  // ChatMessage chat_msg(std::move(restore_msg), "CLIENT_NAME");
+                  // chat_msg.update_time();
+                  // cout << chat_msg.get_display_view().str(); // TEST
+                  std::string new_msg = MessageService::to_string(chat_msg);
+                  broadcast_message(client->first, clients_pool, new_msg);
                 } else {
                   cout << "not auth\n";
                 }
-                break;
-              
+                break;              
               default:break;
             }
           }
