@@ -122,23 +122,20 @@ bool turn_on_nonblock(int fd) {
 std::vector<uint8_t> read_from_fd(int fd) {
   std::vector<uint8_t> bytes;
   std::vector<uint8_t> buffer;
-  buffer.resize(1024);
+  buffer.resize(2);
   ssize_t recived_bytes{};
 
   while (true) {
     recived_bytes = recv(fd, buffer.data(), buffer.size(), 0);
-    if (recived_bytes == -1) {
-      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+    if (recived_bytes <= 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK || recived_bytes == 0) {
         break;
       }
       bytes.clear();
       break;
     }
-    if (recived_bytes == 0) break;
     std::cout << recived_bytes << "\n";
     bytes.insert(bytes.end(), buffer.begin(), buffer.begin() + recived_bytes);
-    buffer.clear();
-    buffer.resize(1024);
   }
 
   return bytes;
