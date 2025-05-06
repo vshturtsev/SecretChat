@@ -27,6 +27,12 @@ clang:
 killserver:
 	killall server
 
+test_main:
+	g++ -std=c++20 -I/usr/local/include/mongocxx/v_noabi -I/usr/local/include/bsoncxx/v_noabi -L/usr/local/lib  test_main.cpp -lmongocxx -lbsoncxx
+
+
+
+
 runserver:
 	@echo "Start server"
 	@nohup $(BIN_DIR)/server > server.log 2>&1 &
