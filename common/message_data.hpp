@@ -18,7 +18,7 @@ struct MsgHeader {
   uint32_t len;
 };
 
-std::vector<uint8_t> marshaling(MsgHeader &headers) {
+std::vector<uint8_t> marshaling(MsgHeader& headers) {
   uint32_t net_type = htonl(static_cast<uint32_t>(headers.type));
   uint32_t net_len = htonl(headers.len);
   std::vector<uint8_t> bytes;
@@ -30,11 +30,15 @@ std::vector<uint8_t> marshaling(MsgHeader &headers) {
   return bytes;
 }
 
-MsgHeader demarshaling(std::vector<uint8_t> bytes) {
+MsgHeader demarshaling(std::vector<uint8_t>& bytes) {
   MsgHeader headers = {};
   memcpy(&headers.type, bytes.data(), sizeof(headers.type));
   memcpy(&headers.len, bytes.data() + sizeof(headers.type), sizeof(headers.len));
   return headers;
+}
+
+std::string demarshaling_string(std::vector<uint8_t>& bytes) {
+  return std::string(bytes.begin(), bytes.end());
 }
 
 class Message {
