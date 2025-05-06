@@ -123,16 +123,19 @@ std::vector<uint8_t> read_from_fd(int fd) {
   std::vector<uint8_t> bytes;
   std::vector<uint8_t> buffer;
   buffer.resize(1024);
-  ssize_t recived_bytes {};
+  ssize_t recived_bytes{};
+
   while (true) {
-    if (recived_bytes = recv(fd, buffer.data(), buffer.size(), 0) == -1) {
+    recived_bytes = recv(fd, buffer.data(), buffer.size(), 0);
+    if (recived_bytes == -1) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
         break;
       }
       bytes.clear();
-      return bytes;
-
+      break;
     }
+    if (recived_bytes == 0) break;
+    std::cout << recived_bytes << "\n";
     bytes.insert(bytes.end(), buffer.begin(), buffer.begin() + recived_bytes);
     buffer.clear();
     buffer.resize(1024);
@@ -184,11 +187,10 @@ int main(void) {
         cout << "client session: " << fd << "\n";        
         auto client = clients_pool.find(fd);
         if (client != clients_pool.end()) {          
-          MsgHeader headers = {};
           // ssize_t receive_headers = recv(client->first, &headers, sizeof(headers), MSG_WAITALL);
           std::vector<uint8_t> bytes_headers = read_from_fd(client->first);
 
-          if (bytes_headers.size() > 0 && bytes_headers.size() != sizeof(headers)) {
+          if (bytes_headers.size() > 0 && bytes_headers.size() != sizeof(MsgHeader)) {
             perror("failed read headers");
             continue;
           }
@@ -196,37 +198,41 @@ int main(void) {
             cout << "disconnect client\n";
             epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client->first, &event);
             clients_pool.erase(client->first);
-            close(fd);          
-          } else {            
-            std::string buffer;
-            buffer.resize(headers.len+1);
+            close(fd);       
+          } else {           
+            MsgHeader headers = demarshaling(bytes_headers);
+            std::cout << bytes_headers.size() << " " << sizeof(headers) << "\n"; 
+            std::cout << "type:" << ((headers.type == MsgType::Auth) ? "AUTH " : "UNCNOW ") << "len: " << headers.len << "\n";
+            return 1;
+            // std::string buffer;
+            // buffer.resize(headers.len+1);
 
-            // ssize_t receive_messsage = recv(client->first, buffer.data(), headers.len, MSG_WAITALL);
-            std::vector<uint8_t> bytes_message = read_from_fd(client->first);
-            switch (headers.type) {
-              case MsgType::Auth:
-                client->second.auth_status = true;
-                client->second.name = "CLIENT_NAME_TODO";//TODO
-                std::cout << "Auth request(" << receive_messsage << " bytes): \n" << buffer << std::endl;
-                break;
+            // // ssize_t receive_messsage = recv(client->first, buffer.data(), headers.len, MSG_WAITALL);
+            // std::vector<uint8_t> bytes_message = read_from_fd(client->first);
+            // switch (headers.type) {
+            //   case MsgType::Auth:
+            //     client->second.auth_status = true;
+            //     client->second.name = "CLIENT_NAME_TODO";//TODO
+            //     std::cout << "Auth request(" << receive_messsage << " bytes): \n" << buffer << std::endl;
+            //     break;
               
-              case MsgType::Chat:
-                if (client->second.auth_status) {
-                  cout << "Received request(" << receive_messsage << " bytes): \n" << buffer << std::endl;
-                  Message restore_msg = MessageService::from_string<Message>(buffer);
-                  ChatMessage chat_msg(std::move(restore_msg), client->second.name);
-                  // ChatMessage chat_msg(std::move(restore_msg), "CLIENT_NAME");
-                  chat_msg.update_time();
-                  // cout << chat_msg.get_display_view().str() << "\n"; // TEST
-                  std::string new_msg = MessageService::to_string(chat_msg);
-                  // cout << new_msg << std::endl;
-                  broadcast_message(client->first, clients_pool, new_msg);
-                } else {
-                  cout << "not auth\n";
-                }
-                break;              
-              default:break;
-            }
+            //   case MsgType::Chat:
+            //     if (client->second.auth_status) {
+            //       cout << "Received request(" << receive_messsage << " bytes): \n" << buffer << std::endl;
+            //       Message restore_msg = MessageService::from_string<Message>(buffer);
+            //       ChatMessage chat_msg(std::move(restore_msg), client->second.name);
+            //       // ChatMessage chat_msg(std::move(restore_msg), "CLIENT_NAME");
+            //       chat_msg.update_time();
+            //       // cout << chat_msg.get_display_view().str() << "\n"; // TEST
+            //       std::string new_msg = MessageService::to_string(chat_msg);
+            //       // cout << new_msg << std::endl;
+            //       broadcast_message(client->first, clients_pool, new_msg);
+            //     } else {
+            //       cout << "not auth\n";
+            //     }
+            //     break;              
+            //   default:break;
+            // }
           }
         }
       }

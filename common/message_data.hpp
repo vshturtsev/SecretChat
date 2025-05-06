@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 #include <string>
+#include <cstring>
 
 using json = nlohmann::json;
 
@@ -12,10 +13,29 @@ enum class MsgType {
   Ping  //?need this? check connection
 };
 
-struct [[gnu::packed]] MsgHeader {
+struct MsgHeader {
   MsgType type;
-  size_t len;
+  uint32_t len;
 };
+
+std::vector<uint8_t> marshaling(MsgHeader &headers) {
+  uint32_t net_type = htonl(static_cast<uint32_t>(headers.type));
+  uint32_t net_len = htonl(headers.len);
+  std::vector<uint8_t> bytes;
+  bytes.insert(bytes.end(), reinterpret_cast<uint8_t *>(&headers.type),
+                            reinterpret_cast<uint8_t *>(&headers.type) + sizeof(headers.type));
+
+  bytes.insert(bytes.end(), reinterpret_cast<uint8_t *>(&headers.len),
+               reinterpret_cast<uint8_t *>(&headers.len) + sizeof(headers.len));
+  return bytes;
+}
+
+MsgHeader demarshaling(std::vector<uint8_t> bytes) {
+  MsgHeader headers = {};
+  memcpy(&headers.type, bytes.data(), sizeof(headers.type));
+  memcpy(&headers.len, bytes.data() + sizeof(headers.type), sizeof(headers.len));
+  return headers;
+}
 
 class Message {
 protected:
