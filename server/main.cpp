@@ -141,6 +141,32 @@ std::vector<uint8_t> read_from_fd(int fd, ssize_t length) {
   return bytes;
 }
 
+void auth_(ClientSession& client, std::string& message) {
+  //TODO: Достать логин и пароль
+  // Сверить пароль и логин с теми что хранятся в базе данных
+  // Если подходит, то ставим статус client.auth_status = true
+  client.auth_status = true;
+  client.name = "CLIENT_NAME_TODO";
+  std::cout << "Auth request(" << message.size() << " bytes): \n" << message << std::endl;
+
+}
+
+void reg_() {
+
+}
+
+bool chat_(ClientSession& client, std::string& message, std::string& message_to_broadcast) {
+  if (client.auth_status) {
+    cout << "Received request(" << message.size() << " bytes): \n" << message << std::endl;
+    Message restore_msg = MessageService::from_string<Message>(message);
+    ChatMessage chat_msg(std::move(restore_msg), client.name);
+    chat_msg.update_time();
+    message_to_broadcast = MessageService::to_string(chat_msg);
+    return true;
+  } 
+  return false;
+}
+
 
 int main(void) {
   // if (fopen("config.txt"))
@@ -200,27 +226,20 @@ int main(void) {
             MsgHeader headers = demarshaling(bytes_headers);
             std::vector<uint8_t> bytes_message = read_from_fd(client->first, headers.len);
             std::string msg = demarshaling_string(bytes_message);
+            std::string message_to_broadcast;
+
             switch (headers.type) {
               case MsgType::Reg:
+                reg_();
                 break;
 
               case MsgType::Auth:
-                client->second.auth_status = true;
-                client->second.name = "CLIENT_NAME_TODO";//TODO
-                std::cout << "Auth request(" << bytes_message.size() << " bytes): \n" << msg << std::endl;
+                auth_(client->second, msg);
                 break;
               
               case MsgType::Chat:
-                if (client->second.auth_status) {
-                  cout << "Received request(" << bytes_message.size() << " bytes): \n" << msg << std::endl;
-                  Message restore_msg = MessageService::from_string<Message>(msg);
-                  ChatMessage chat_msg(std::move(restore_msg), client->second.name);
-                  // ChatMessage chat_msg(std::move(restore_msg), "CLIENT_NAME");
-                  chat_msg.update_time();
-                  // cout << chat_msg.get_display_view().str() << "\n"; // TEST
-                  std::string new_msg = MessageService::to_string(chat_msg);
-                  // cout << new_msg << std::endl;
-                  broadcast_message(client->first, clients_pool, new_msg);
+                if (chat_(client->second, msg, message_to_broadcast)) {
+                  broadcast_message(client->first, clients_pool, message_to_broadcast);
                 } else {
                   cout << "not auth\n";
                 }
