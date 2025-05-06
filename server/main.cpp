@@ -4,6 +4,7 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <fcntl.h> // For nonBlock
 
 #include <chrono>
 #include <cstring>
@@ -104,6 +105,43 @@ void broadcast_message(int autor_fd, std::unordered_map<int, ClientSession> clie
   }
 }
 
+bool turn_on_nonblock(int fd) {
+  int flags = fcntl(fd, F_GETFL);
+  if (flags == -1) {
+    return false;
+  }
+  
+  flags |= O_NONBLOCK;
+  if (fcntl(fd, F_SETFL, flags) == -1) {
+    return false;
+  }
+
+  return true;
+}
+
+std::vector<uint8_t> read_from_fd(int fd) {
+  std::vector<uint8_t> bytes;
+  std::vector<uint8_t> buffer;
+  buffer.resize(1024);
+  ssize_t recived_bytes {};
+  while (true) {
+    if (recived_bytes = recv(fd, buffer.data(), buffer.size(), 0) == -1) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        break;
+      }
+      bytes.clear();
+      return bytes;
+
+    }
+    bytes.insert(bytes.end(), buffer.begin(), buffer.begin() + recived_bytes);
+    buffer.clear();
+    buffer.resize(1024);
+  }
+
+  return bytes;
+}
+
+
 int main(void) {
   // if (fopen("config.txt"))
   // else {
@@ -130,6 +168,11 @@ int main(void) {
     for (int i = 0; i < ready_fd; i++) {
       if (ev_list[i].data.fd == serv_fd) {
         int new_sock = accept(server.get_fd(), nullptr, nullptr);
+        if (!turn_on_nonblock(new_sock)) {
+          close(new_sock);
+          continue;
+        }
+        
         cout << "connected: " << new_sock << "\n";
         clients_pool.emplace(new_sock, ClientSession{"", false});
         event.events = EPOLLIN | EPOLLET;
@@ -142,21 +185,24 @@ int main(void) {
         auto client = clients_pool.find(fd);
         if (client != clients_pool.end()) {          
           MsgHeader headers = {};
-          ssize_t receive_headers = recv(client->first, &headers, sizeof(headers), MSG_WAITALL);
-          if (receive_headers > 0 && receive_headers != sizeof(headers)) {
+          // ssize_t receive_headers = recv(client->first, &headers, sizeof(headers), MSG_WAITALL);
+          std::vector<uint8_t> bytes_headers = read_from_fd(client->first);
+
+          if (bytes_headers.size() > 0 && bytes_headers.size() != sizeof(headers)) {
             perror("failed read headers");
             continue;
           }
-          if (receive_headers <= 0) {
+          if (bytes_headers.size() <= 0) {
             cout << "disconnect client\n";
             epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client->first, &event);
-            clients_pool.erase(client->first);          
+            clients_pool.erase(client->first);
+            close(fd);          
           } else {            
             std::string buffer;
             buffer.resize(headers.len+1);
 
-            ssize_t receive_messsage = recv(client->first, buffer.data(), headers.len, MSG_WAITALL);
-
+            // ssize_t receive_messsage = recv(client->first, buffer.data(), headers.len, MSG_WAITALL);
+            std::vector<uint8_t> bytes_message = read_from_fd(client->first);
             switch (headers.type) {
               case MsgType::Auth:
                 client->second.auth_status = true;
