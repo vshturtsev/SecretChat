@@ -30,7 +30,7 @@ std::vector<uint8_t> marshaling(MsgHeader& headers) {
   return bytes;
 }
 
-MsgHeader demarshaling(std::vector<uint8_t>& bytes) {
+MsgHeader demarshaling_header(std::vector<uint8_t>& bytes) {
   MsgHeader headers = {};
   memcpy(&headers.type, bytes.data(), sizeof(headers.type));
   memcpy(&headers.len, bytes.data() + sizeof(headers.type), sizeof(headers.len));

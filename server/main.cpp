@@ -123,7 +123,7 @@ std::vector<uint8_t> read_from_fd(int fd, ssize_t length) {
   std::vector<uint8_t> buffer;
   buffer.resize(2);
   ssize_t recived_bytes{};
-
+  
   while (length > 0) {
     recived_bytes = recv(fd, buffer.data(), buffer.size(), 0);
     if (recived_bytes <= 0) {
@@ -137,8 +137,12 @@ std::vector<uint8_t> read_from_fd(int fd, ssize_t length) {
     std::cout << recived_bytes << "\n";
     bytes.insert(bytes.end(), buffer.begin(), buffer.begin() + recived_bytes);
   }
-
+  
   return bytes;
+}
+
+void reg_() {
+
 }
 
 void auth_(ClientSession& client, std::string& message) {
@@ -151,9 +155,6 @@ void auth_(ClientSession& client, std::string& message) {
 
 }
 
-void reg_() {
-
-}
 
 bool chat_(ClientSession& client, std::string& message, std::string& message_to_broadcast) {
   if (client.auth_status) {
@@ -210,7 +211,6 @@ int main(void) {
         cout << "client session: " << fd << "\n";        
         auto client = clients_pool.find(fd);
         if (client != clients_pool.end()) {          
-          // ssize_t receive_headers = recv(client->first, &headers, sizeof(headers), MSG_WAITALL);
           std::vector<uint8_t> bytes_headers = read_from_fd(client->first, 8);
           std::cout << "byte size: " << bytes_headers.size() << " msgHead size: " << sizeof(MsgHeader) << std::endl;
           if (bytes_headers.size() > 0 && bytes_headers.size() != sizeof(MsgHeader)) {
@@ -223,9 +223,9 @@ int main(void) {
             clients_pool.erase(client->first);
             close(fd);       
           } else {           
-            MsgHeader headers = demarshaling(bytes_headers);
+            MsgHeader headers = demarshaling_header(bytes_headers);
             std::vector<uint8_t> bytes_message = read_from_fd(client->first, headers.len);
-            std::string msg = demarshaling_string(bytes_message);
+            std::string message = demarshaling_string(bytes_message);
             std::string message_to_broadcast;
 
             switch (headers.type) {
@@ -234,11 +234,11 @@ int main(void) {
                 break;
 
               case MsgType::Auth:
-                auth_(client->second, msg);
+                auth_(client->second, message);
                 break;
               
               case MsgType::Chat:
-                if (chat_(client->second, msg, message_to_broadcast)) {
+                if (chat_(client->second, message, message_to_broadcast)) {
                   broadcast_message(client->first, clients_pool, message_to_broadcast);
                 } else {
                   cout << "not auth\n";
