@@ -62,11 +62,11 @@ class Client {
         }
         return fd;
     }
-    int authentication(int fd, MsgType type) {
-        std::string login = "vova";
-        std::string password = "true";
+    int authentication(std::string& username, std::string& user_password, int fd, MsgType type) {
+        std::string login = username;
+        std::string password = user_password;
 
-        AuthMessage auth_message(login, password);
+        AuthMessage auth_message(login, user_password);
         std::string json_message = MessageService::to_string(auth_message);
         
         MsgHeader headers = {
@@ -139,7 +139,13 @@ public:
         if (write_fd < 0) return;
         connected = true;
         // Get from Vovan QT type of message
-        if (authentication(write_fd, MsgType::Auth) < 0) return;
+        
+        std::string username;
+        std::string password;
+        std::cin >> username;
+        std::cin >> password;
+
+        if (authentication(username, password, write_fd, MsgType::Auth) < 0) return;
         int read_fd = dup(write_fd);
         std::thread t([&,this]{ read_broadcast(read_fd); });
         std::string msg;
