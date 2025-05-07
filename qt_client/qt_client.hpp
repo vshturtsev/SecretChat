@@ -73,7 +73,7 @@ class Client {
         
         const MsgHeader headers = {
             .type = message.get_type(),
-            .len = static_cast<u_int32_t>(json_message.size())
+            .len = static_cast<uint32_t>(json_message.size())
         };
 
         cout << headers.len << " " << sizeof(headers) << "\n";
@@ -91,7 +91,7 @@ class Client {
         
         const MsgHeader headers = {
             .type = message_chat.get_type(),
-            .len = static_cast<u_int32_t>(json_message.size())
+            .len = static_cast<uint32_t>(json_message.size())
         };
 
         cout << headers.len << " " << sizeof(headers) << "\n";
