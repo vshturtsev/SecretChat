@@ -17,7 +17,7 @@
 #include <string>
 
 #include "../common/message_data.hpp"
-#include "client.hpp"
+#include "qt_client.hpp"
 #include "LoginService.hpp"
 #include "LoginView.hpp"
 

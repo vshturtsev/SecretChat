@@ -37,11 +37,13 @@
 *.log
 **/bin/
 **/obj/
+**/build/
+**/test_main.cpp
 /remote_srv/
 test.cpp
 /.vscode/
 /server/client_test/
 /server/bin/
-test_main.cpp
 /mongo/data
 /mongo/data/journal
+/temp_files
