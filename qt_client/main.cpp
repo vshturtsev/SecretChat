@@ -24,6 +24,21 @@
 
 // }
 
+class LoginService {
+    
+};
+
+class LoginView : public QWidget {
+    LoginService *log_service;
+    
+    LoginView(QWidget *parent=nullptr) : QWidget(parent) {
+
+    }
+    ~LoginView() {};
+};
+
+
+
 
 int main(int argc, char *argv[])
 {
