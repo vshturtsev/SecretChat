@@ -50,6 +50,9 @@ protected:
 public:
   NLOHMANN_DEFINE_TYPE_INTRUSIVE(AuthMessage, login, password);
   AuthMessage() = default;
+  AuthMessage(std::string& login, std::string& password) : login(login), password(password)
+    { }
+    
   const std::string& get_login() const { return login; }
   const std::string& get_password() const {return password; }
 };
