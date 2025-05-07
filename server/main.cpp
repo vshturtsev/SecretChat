@@ -166,8 +166,44 @@ std::string get_password_by_username_from_db(const std::string& username, mongoc
   return "";
 }
 
-void reg_() {
 
+std::string get_password_by_username_from_db(const std::string& username, mongocxx::collection users) {
+  bsoncxx::builder::stream::document filter_builder;
+  filter_builder << "username" << username;
+  auto result = users.find_one(filter_builder.view());
+  
+  if (result) {
+    auto view = result->view();
+    auto it = view.find("password_hash");
+    if (it != view.end()) {
+      std::string password = static_cast<std::string>(it->get_string().value);
+      return password;
+    }
+  }
+  return "";
+}
+
+bool reg_(ClientSession& client, const std::string& message, mongocxx::collection users) {
+  bsoncxx::builder::stream::document filter_builder;
+  AuthMessage auth_data = MessageService::from_string<AuthMessage>(message);
+  filter_builder << "username" << auth_data.get_login();
+  auto result = users.find_one(filter_builder.view());
+  if (!result) {
+    bsoncxx::builder::stream::document user_builder;
+    user_builder << "username" << auth_data.get_login()
+    << "password_hash" << auth_data.get_password()
+    << "created_at" << bsoncxx::types::b_date{std::chrono::system_clock::now()};
+    auto result = users.insert_one(user_builder.view());
+    if (result) {
+      client.auth_status = true;
+      client.name = auth_data.get_login();
+      return true;
+    }
+    std::cerr << "Error insert document to db" << std::endl;
+    return false;
+  } else {
+    return false;
+  }
 }
 
 void auth_(ClientSession& client, std::string& message, mongocxx::collection users) {
@@ -279,7 +315,7 @@ int main(void) {
 
             switch (headers.type) {
               case MsgType::Reg:
-                reg_();
+                reg_(client->second, message, users);
                 break;
 
               case MsgType::Auth:
