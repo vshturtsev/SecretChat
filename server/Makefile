@@ -1,5 +1,7 @@
 CC = g++
-CFLAGS =
+CFLAGS = -std=c++17
+DATAFLAGS = -I/usr/local/include/mongocxx/v_noabi -I/usr/local/include/bsoncxx/v_noabi -L/usr/local/lib
+DATALIB = -lmongocxx -lbsoncxx
 
 BIN_DIR = bin
 OBJ_DIR = obj
@@ -10,7 +12,8 @@ client: ../client/src/main.cpp
 	$(CC) $^ -o $(BIN_DIR)/client
 
 main: main.cpp
-	$(CC) $^ -o $(BIN_DIR)/server
+	# $(CC) $^ -o $(BIN_DIR)/server
+	$(CC) $^ $(DATAFLAGS) -o server $(DATALIB)
 
 $(OBJ_DIR)/%.o: %.cpp
 	$(CC) -c -o $@ $< $(CFLAGS)

@@ -17,6 +17,15 @@
 #include <nlohmann/json.hpp>
 #include <thread>
 
+// DataBase includes start
+#include <mongocxx/client.hpp>
+#include <mongocxx/instance.hpp>
+#include <mongocxx/uri.hpp>
+#include <bsoncxx/builder/stream/document.hpp>
+#include <bsoncxx/json.hpp>
+#include <bsoncxx/types.hpp>
+// DataBase includes end
+
 #include "../common/message_data.hpp"
 
 // class MessageData;
@@ -145,7 +154,7 @@ void reg_() {
 
 }
 
-void auth_(ClientSession& client, std::string& message) {
+void auth_(ClientSession& client, std::string& message, mongocxx::collection users) {
   //TODO: Достать логин и пароль
   // Сверить пароль и логин с теми что хранятся в базе данных
   // Если подходит, то ставим статус client.auth_status = true
@@ -174,6 +183,12 @@ int main(void) {
   // else {
   //     take_args(); // scanf();
   // }
+
+  mongocxx::instance instance{};
+  mongocxx::client client{mongocxx::uri{"mongodb://root:example@localhost:27017"}};
+  auto db = client["chat_db"];
+  auto users = db["users"];
+
   Server server;
   server.start_listen(9090);
   int serv_fd = server.get_fd();
@@ -234,7 +249,7 @@ int main(void) {
                 break;
 
               case MsgType::Auth:
-                auth_(client->second, message);
+                auth_(client->second, message, users);
                 break;
               
               case MsgType::Chat:

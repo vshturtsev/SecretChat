@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <cstring>
+#include <arpa/inet.h>
 
 using json = nlohmann::json;
 
@@ -40,6 +41,18 @@ MsgHeader demarshaling_header(std::vector<uint8_t>& bytes) {
 std::string demarshaling_string(std::vector<uint8_t>& bytes) {
   return std::string(bytes.begin(), bytes.end());
 }
+
+class AuthMessage {
+protected:
+  std::string login;
+  std::string password;
+
+public:
+  NLOHMANN_DEFINE_TYPE_INTRUSIVE(AuthMessage, login, password);
+  AuthMessage() = default;
+  const std::string& get_login() const { return login; }
+  const std::string& get_password() const {return password; }
+};
 
 class Message {
 protected:
