@@ -12,6 +12,7 @@
 
 // #include <sys/time.h>
 #include "../../common/message_data.hpp"
+#include <unistd.h>
 
 using json = nlohmann::json;
 using std::cout;
@@ -68,16 +69,18 @@ class Client {
         
         std::string json_message = MessageService::to_string(message);
         
-        const MsgHeader headers = {
+        MsgHeader headers = {
             .type = message.get_type(),
-            .len = json_message.size()
+            .len = static_cast<uint32_t>(json_message.size())
         };
-
-        cout << headers.len << " " << sizeof(headers) << "\n";
-        ssize_t sent = send(fd, &headers, sizeof(headers), 0);
-        if (sent != sizeof(headers)) {
-            perror("failed send headers");
+        std::cout << "message: " << json_message.size() << "\n";
+        std::vector<uint8_t> bytes_headers = marshaling(headers);
+        ssize_t sent = send(fd, bytes_headers.data(), bytes_headers.size(), 0);
+        if (sent < 0) {
+            perror("failed send headers to server");
+            return -1;
         }
+        
         int status = send_message(fd, json_message);
         return status;
     }
@@ -85,22 +88,20 @@ class Client {
         Message message_chat (MsgType::Chat, message);
         std::string json_message =  MessageService::to_string(message_chat);
         
-        const MsgHeader headers = {
+        MsgHeader headers = {
             .type = message_chat.get_type(),
-            .len = json_message.size()
+            .len = static_cast<uint32_t>(json_message.size())
         };
 
-        cout << headers.len << " " << sizeof(headers) << "\n";
-        ssize_t sent = send(fd, &headers, sizeof(headers), 0);
-        if (sent != sizeof(headers)) {
-            perror("failed send headers");
-        }
+        std::vector<uint8_t> bytes_headers = marshaling(headers);
+        
+        ssize_t sent = send(fd, bytes_headers.data(), bytes_headers.size(), 0);
         int status = send_message(fd, json_message);
         return status;
     }
     int send_message(int fd, std::string& message) {
-        if (!connected) return 0;
         ssize_t sent = send(fd, message.data(), message.size(), MSG_NOSIGNAL);
+        std::cout << "From client size message: " << sent << std::endl;
         if (sent < 0) {
             if (errno == EPIPE) {
                 std::cout << "server disconnect: send" << '\n';
@@ -113,8 +114,11 @@ class Client {
     }
     void read_broadcast(int fd) {
         std::string buffer;
-        buffer.resize(1024);
+
         while (1) {
+            buffer.clear();
+            buffer.resize(1024);
+            std::cout << "ready broadcast\n";
             ssize_t receive = recv(fd, buffer.data(), buffer.size(), 0);
             if (receive == 0) {
                 connected = false;
@@ -124,27 +128,28 @@ class Client {
                 perror("failed read to server");
                 return;
             }
-            // std::cout << buffer << std::endl;
             ChatMessage chat_msg = MessageService::from_string<ChatMessage>(buffer);
             std::cout << chat_msg.get_display_view().str() << std::endl;
-            buffer.clear();
         }
     }
 public:
     void run()
     {
-        int fd = connect();
-        if (fd < 0) return;
+        int write_fd = connect();
+        if (write_fd < 0) return;
         connected = true;
-        if (!authentication(fd)) return;
-        std::thread t([&,this]{ read_broadcast(fd); });
+        if (authentication(write_fd) < 0) return;
+        int read_fd = dup(write_fd);
+        std::thread t([&,this]{ read_broadcast(read_fd); });
         std::string msg;
         while (std::getline(std::cin, msg)) {
-            if (send_chat(fd, msg) <= 0) {
+            if (send_chat(write_fd, msg) <= 0) {
                 std::cout << "close connection" << "\n";
                 break;
             }
         }
+        close(write_fd);
+        close(read_fd);
         t.join();
     }
 };

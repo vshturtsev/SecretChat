@@ -4,6 +4,7 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <fcntl.h> // For nonBlock
 
 #include <chrono>
 #include <cstring>
@@ -72,7 +73,6 @@ class Server {
     if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
       perror("setcokopt(SO_REUSEADDR) failed");
     }
-
     if (bind(fd, (struct sockaddr *)&srv_addr, sizeof(srv_addr)) < 0) {
       perror("Binding failed.");
       exit(EXIT_FAILURE);
@@ -104,6 +104,71 @@ void broadcast_message(int autor_fd, std::unordered_map<int, ClientSession> clie
   }
 }
 
+bool turn_on_nonblock(int fd) {
+  int flags = fcntl(fd, F_GETFL);
+  if (flags == -1) {
+    return false;
+  }
+  
+  flags |= O_NONBLOCK;
+  if (fcntl(fd, F_SETFL, flags) == -1) {
+    return false;
+  }
+
+  return true;
+}
+
+std::vector<uint8_t> read_from_fd(int fd, ssize_t length) {
+  std::vector<uint8_t> bytes;
+  std::vector<uint8_t> buffer;
+  buffer.resize(2);
+  ssize_t recived_bytes{};
+  
+  while (length > 0) {
+    recived_bytes = recv(fd, buffer.data(), buffer.size(), 0);
+    if (recived_bytes <= 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK || recived_bytes == 0) {
+        break;
+      }
+      bytes.clear();
+      break;
+    }
+    length -= recived_bytes;
+    std::cout << recived_bytes << "\n";
+    bytes.insert(bytes.end(), buffer.begin(), buffer.begin() + recived_bytes);
+  }
+  
+  return bytes;
+}
+
+void reg_() {
+
+}
+
+void auth_(ClientSession& client, std::string& message) {
+  //TODO: Достать логин и пароль
+  // Сверить пароль и логин с теми что хранятся в базе данных
+  // Если подходит, то ставим статус client.auth_status = true
+  client.auth_status = true;
+  client.name = "CLIENT_NAME_TODO";
+  std::cout << "Auth request(" << message.size() << " bytes): \n" << message << std::endl;
+
+}
+
+
+bool chat_(ClientSession& client, std::string& message, std::string& message_to_broadcast) {
+  if (client.auth_status) {
+    cout << "Received request(" << message.size() << " bytes): \n" << message << std::endl;
+    Message restore_msg = MessageService::from_string<Message>(message);
+    ChatMessage chat_msg(std::move(restore_msg), client.name);
+    chat_msg.update_time();
+    message_to_broadcast = MessageService::to_string(chat_msg);
+    return true;
+  } 
+  return false;
+}
+
+
 int main(void) {
   // if (fopen("config.txt"))
   // else {
@@ -130,6 +195,11 @@ int main(void) {
     for (int i = 0; i < ready_fd; i++) {
       if (ev_list[i].data.fd == serv_fd) {
         int new_sock = accept(server.get_fd(), nullptr, nullptr);
+        if (!turn_on_nonblock(new_sock)) {
+          close(new_sock);
+          continue;
+        }
+        
         cout << "connected: " << new_sock << "\n";
         clients_pool.emplace(new_sock, ClientSession{"", false});
         event.events = EPOLLIN | EPOLLET;
@@ -141,40 +211,35 @@ int main(void) {
         cout << "client session: " << fd << "\n";        
         auto client = clients_pool.find(fd);
         if (client != clients_pool.end()) {          
-          MsgHeader headers = {};
-          ssize_t receive_headers = recv(client->first, &headers, sizeof(headers), MSG_WAITALL);
-          if (receive_headers > 0 && receive_headers != sizeof(headers)) {
+          std::vector<uint8_t> bytes_headers = read_from_fd(client->first, 8);
+          std::cout << "byte size: " << bytes_headers.size() << " msgHead size: " << sizeof(MsgHeader) << std::endl;
+          if (bytes_headers.size() > 0 && bytes_headers.size() != sizeof(MsgHeader)) {
             perror("failed read headers");
             continue;
           }
-          if (receive_headers <= 0) {
+          if (bytes_headers.size() <= 0) {
             cout << "disconnect client\n";
             epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client->first, &event);
-            clients_pool.erase(client->first);          
-          } else {            
-            std::string buffer;
-            buffer.resize(headers.len+1);
-
-            ssize_t receive_messsage = recv(client->first, buffer.data(), headers.len, MSG_WAITALL);
+            clients_pool.erase(client->first);
+            close(fd);       
+          } else {           
+            MsgHeader headers = demarshaling_header(bytes_headers);
+            std::vector<uint8_t> bytes_message = read_from_fd(client->first, headers.len);
+            std::string message = demarshaling_string(bytes_message);
+            std::string message_to_broadcast;
 
             switch (headers.type) {
+              case MsgType::Reg:
+                reg_();
+                break;
+
               case MsgType::Auth:
-                client->second.auth_status = true;
-                client->second.name = "CLIENT_NAME_TODO";//TODO
-                std::cout << "Auth request(" << receive_messsage << " bytes): \n" << buffer << std::endl;
+                auth_(client->second, message);
                 break;
               
               case MsgType::Chat:
-                if (client->second.auth_status) {
-                  cout << "Received request(" << receive_messsage << " bytes): \n" << buffer << std::endl;
-                  Message restore_msg = MessageService::from_string<Message>(buffer);
-                  ChatMessage chat_msg(std::move(restore_msg), client->second.name);
-                  // ChatMessage chat_msg(std::move(restore_msg), "CLIENT_NAME");
-                  chat_msg.update_time();
-                  // cout << chat_msg.get_display_view().str() << "\n"; // TEST
-                  std::string new_msg = MessageService::to_string(chat_msg);
-                  // cout << new_msg << std::endl;
-                  broadcast_message(client->first, clients_pool, new_msg);
+                if (chat_(client->second, message, message_to_broadcast)) {
+                  broadcast_message(client->first, clients_pool, message_to_broadcast);
                 } else {
                   cout << "not auth\n";
                 }
