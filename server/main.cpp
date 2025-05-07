@@ -143,29 +143,12 @@ std::vector<uint8_t> read_from_fd(int fd, ssize_t length) {
       break;
     }
     length -= recived_bytes;
-    std::cout << recived_bytes << "\n";
+    // std::cout << recived_bytes << "\n";
     bytes.insert(bytes.end(), buffer.begin(), buffer.begin() + recived_bytes);
   }
   
   return bytes;
 }
-
-std::string get_password_by_username_from_db(const std::string& username, mongocxx::collection users) {
-  bsoncxx::builder::stream::document filter_builder;
-  filter_builder << "username" << username;
-  auto result = users.find_one(filter_builder.view());
-  
-  if (result) {
-    auto view = result->view();
-    auto it = view.find("password_hash");
-    if (it != view.end()) {
-      std::string password = static_cast<std::string>(it->get_string().value);
-      return password;
-    }
-  }
-  return "";
-}
-
 
 std::string get_password_by_username_from_db(const std::string& username, mongocxx::collection users) {
   bsoncxx::builder::stream::document filter_builder;

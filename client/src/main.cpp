@@ -142,10 +142,10 @@ public:
         
         std::string username;
         std::string password;
-        std::cin >> username;
-        std::cin >> password;
+        std::getline(std::cin, username);
+        std::getline(std::cin, password);
 
-        if (authentication(username, password, write_fd, MsgType::Auth) < 0) return;
+        if (authentication(username, password, write_fd, MsgType::Reg) < 0) return;
         int read_fd = dup(write_fd);
         std::thread t([&,this]{ read_broadcast(read_fd); });
         std::string msg;
