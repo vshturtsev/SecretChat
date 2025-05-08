@@ -36,25 +36,6 @@ using json = nlohmann::json;
 using ChatHistory = std::list<Message>;
 using std::cout;
 
-
-
-// void print_chat(ChatHistory chat) {
-//   std::cout << "Chat History:\n";
-//   for (auto it = chat.begin(); it != chat.end(); ++it) {
-//     std::cout << timePointToString(it->first) << " (user " << it->second.sender_id << "):\n";
-//     std::cout << it->second.content << '\n' << std::endl;
-//   }
-// }
-
-// void proccess_message(const char *buffer, ChatHistory &chat) {
-//   auto received_json = json::parse(buffer);
-//   MessageData msg_data = received_json.get<MessageData>();
-//   Timepoint now = std::chrono::system_clock::now();
-//   Message msg{now, msg_data};
-//   chat.push_back(msg);
-//   print_chat(chat);
-// }
-
 constexpr int BACKLOG = 10;
 constexpr int MAX_EVENTS = 10;
 
@@ -187,17 +168,71 @@ bool turn_on_nonblock(int fd) {
 
   return true;
 }
+
+
+class MongoManager {
+private:
+    mongocxx::instance _instance;
+    mongocxx::client _client;
+    MongoManager() : _client{mongocxx::uri{"mongodb://root:example@localhost:27017"}} 
+        { }
+    
+    MongoManager(const MongoManager&) = delete;
+    MongoManager& operator=(const MongoManager&) = delete;
+
+public:
+    static MongoManager& get_instance() {
+        static MongoManager instance;
+        return instance;
+    }
+
+    mongocxx::database get_database(const std::string& name_db = "chat_db") {
+        return _client[name_db];
+    }
+};
+  
+class User {
+
+public:
+  User() = default;
+  ClientSession add_user(const std::string& username, const std::string& password) {
+    
+    mongocxx::database db = MongoManager::get_instance().get_database();
+    mongocxx::collection users = db["users"];
+    bsoncxx::builder::stream::document filter_builder;
+    
+    ClientSession new_client;
+    filter_builder << "username" << username;
+    auto result = users.find_one(filter_builder.view());
+    if (!result) {
+      bsoncxx::builder::stream::document user_builder;
+      user_builder << "username" << username
+      << "password_hash" << password
+      << "created_at" << bsoncxx::types::b_date{std::chrono::system_clock::now()};
+      auto result = users.insert_one(user_builder.view());
+      if (result) {
+        new_client.auth_status = true;
+        new_client.name = username;
+        return new_client;
+      }
+      std::cerr << "Error insert document to db" << std::endl;
+      
+      return new_client;
+    } else {
+      return new_client;
+    }
+  }
+  
+};
+
 bool reg(ClientSession& client, const std::string& message) {
   AuthMessage auth_data = MessageService::from_string<AuthMessage>(message);
-  // User user;
-  // client = user.add_user(auth_data.get_login(), auth_data.get_password());
-  // return client.auth_status;
-  return true;
+  User user;
+  client = user.add_user(auth_data.get_login(), auth_data.get_password());
+  return client.auth_status;
 }
+
 void auth(ClientSession& client, std::string& message) {
-  //TODO: Достать логин и пароль
-  // Сверить пароль и логин с теми что хранятся в базе данных
-  // Если подходит, то ставим статус client.auth_status = true
   AuthMessage auth_data = MessageService::from_string<AuthMessage>(message);
   // std::string current_password = get_password_by_username_from_db(auth_data.get_login(), users);
   if (!current_password.empty()) {
@@ -261,7 +296,6 @@ int main(void) {
     exit(EXIT_FAILURE);
   }
   int serv_fd = server.get_fd();
-  mongocxx::instance instance{};
   int epoll_fd = epoll_create1(0);
 
   struct epoll_event event, ev_list[MAX_EVENTS];
