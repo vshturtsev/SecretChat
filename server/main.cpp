@@ -58,6 +58,19 @@ using std::cout;
 constexpr int BACKLOG = 10;
 constexpr int MAX_EVENTS = 10;
 
+using ClientPoll = std::unordered_map<int, ClientSession>;
+
+class ClientSession {
+  
+ public:
+  ClientSession() = default;
+  ClientSession(int _fd) : fd(_fd) {}
+  const int fd = 0;
+  std::string name;
+  bool auth_status = false;
+};
+
+
 class Server {
   int fd;
 
@@ -71,38 +84,86 @@ class Server {
   }
   ~Server() { close(fd); }
 
-  int get_fd(void) const { return fd; }
+  std::vector<uint8_t> read_from_fd(const int fd, ssize_t length) {
+    std::vector<uint8_t> bytes;
+    std::vector<uint8_t> buffer;
+    buffer.resize(2);
+    ssize_t recived_bytes{};
 
-  void start_listen(int port) {
+    while (length > 0) {
+      recived_bytes = recv(fd, buffer.data(), buffer.size(), 0);
+      if (recived_bytes <= 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK || recived_bytes == 0) {
+          break;
+        }
+        bytes.clear();
+        break;
+      }
+      length -= recived_bytes;
+      bytes.insert(bytes.end(), buffer.begin(), buffer.begin() + recived_bytes);
+    }
+    return bytes;
+  }
+
+  int handle_client(ClientSession& client_session, ClientPoll& clients_pool) {
+    std::vector<uint8_t> bytes_headers = read_from_fd(client_session.fd, 8);
+    std::cout << "byte size: " << bytes_headers.size() << " msgHead size: " << sizeof(MsgHeader) << std::endl;
+    if (bytes_headers.size() > 0 && bytes_headers.size() != sizeof(MsgHeader))
+      return -1;
+
+    if (bytes_headers.size() <= 0) {
+      return 0;
+    }
+    MsgHeader headers = demarshaling_header(bytes_headers);
+    std::vector<uint8_t> bytes_message = read_from_fd(client_session.fd, headers.len);
+    std::string message = demarshaling_string(bytes_message);
+    std::string message_to_broadcast;
+    switch (headers.type) {
+      case MsgType::Reg:
+        reg(client_session, message);
+        break;
+      case MsgType::Auth:
+        auth(client_session, message);
+        break;
+      
+      case MsgType::Chat:
+        if (chat_(client_session, message, message_to_broadcast)) {
+          broadcast_message(client_session.fd, clients_pool, message_to_broadcast);
+        } else {
+          cout << "not auth\n";
+        }
+        break;              
+      default:break;
+    }
+    return 1;
+  }
+
+  int to_listen(uint16_t port) {
     struct sockaddr_in srv_addr = {};
     srv_addr.sin_addr.s_addr = INADDR_ANY;
     srv_addr.sin_family = AF_INET;
     srv_addr.sin_port = htons(port);
     int opt = 1;
-    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+    int status = 0;
+
+    if (!status && (status = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) < 0) {
       perror("setcokopt(SO_REUSEADDR) failed");
     }
-    if (bind(fd, (struct sockaddr *)&srv_addr, sizeof(srv_addr)) < 0) {
+    if (!status && (status = bind(fd, (struct sockaddr *)&srv_addr, sizeof(srv_addr))) < 0) {
       perror("Binding failed.");
-      exit(EXIT_FAILURE);
     }
-
-    if (listen(fd, BACKLOG) == 0) {
-      std::cout << "Server ready. Listening on port " << port << std::endl;
-    } else {
+    if (!status && (status = listen(fd, BACKLOG)) < 0) {
       perror("Listening failed.");
-      exit(EXIT_FAILURE);
+    } else {
+      std::cout << "Server ready. Listening on port " << port << std::endl;
     }
+    return status;
   }
+  int get_fd(void) const { return fd; }
+
 };
 
-class ClientSession {
- public:
-  std::string name;
-  bool auth_status = false;
-};
-
-void broadcast_message(int autor_fd, std::unordered_map<int, ClientSession> clients_pool, std::string message) {
+void broadcast_message(int autor_fd, ClientPoll clients_pool, std::string message) {
   // std::cout << "broadcast: " << message << std::endl;
   for (const auto &[fd, client_session] : clients_pool) {
     if (fd != autor_fd && client_session.auth_status) {
@@ -126,75 +187,19 @@ bool turn_on_nonblock(int fd) {
 
   return true;
 }
-
-std::vector<uint8_t> read_from_fd(int fd, ssize_t length) {
-  std::vector<uint8_t> bytes;
-  std::vector<uint8_t> buffer;
-  buffer.resize(2);
-  ssize_t recived_bytes{};
-  
-  while (length > 0) {
-    recived_bytes = recv(fd, buffer.data(), buffer.size(), 0);
-    if (recived_bytes <= 0) {
-      if (errno == EAGAIN || errno == EWOULDBLOCK || recived_bytes == 0) {
-        break;
-      }
-      bytes.clear();
-      break;
-    }
-    length -= recived_bytes;
-    // std::cout << recived_bytes << "\n";
-    bytes.insert(bytes.end(), buffer.begin(), buffer.begin() + recived_bytes);
-  }
-  
-  return bytes;
-}
-
-std::string get_password_by_username_from_db(const std::string& username, mongocxx::collection users) {
-  bsoncxx::builder::stream::document filter_builder;
-  filter_builder << "username" << username;
-  auto result = users.find_one(filter_builder.view());
-  
-  if (result) {
-    auto view = result->view();
-    auto it = view.find("password_hash");
-    if (it != view.end()) {
-      std::string password = static_cast<std::string>(it->get_string().value);
-      return password;
-    }
-  }
-  return "";
-}
-
-bool reg_(ClientSession& client, const std::string& message, mongocxx::collection users) {
-  bsoncxx::builder::stream::document filter_builder;
+bool reg(ClientSession& client, const std::string& message) {
   AuthMessage auth_data = MessageService::from_string<AuthMessage>(message);
-  filter_builder << "username" << auth_data.get_login();
-  auto result = users.find_one(filter_builder.view());
-  if (!result) {
-    bsoncxx::builder::stream::document user_builder;
-    user_builder << "username" << auth_data.get_login()
-    << "password_hash" << auth_data.get_password()
-    << "created_at" << bsoncxx::types::b_date{std::chrono::system_clock::now()};
-    auto result = users.insert_one(user_builder.view());
-    if (result) {
-      client.auth_status = true;
-      client.name = auth_data.get_login();
-      return true;
-    }
-    std::cerr << "Error insert document to db" << std::endl;
-    return false;
-  } else {
-    return false;
-  }
+  // User user;
+  // client = user.add_user(auth_data.get_login(), auth_data.get_password());
+  // return client.auth_status;
+  return true;
 }
-
-void auth_(ClientSession& client, std::string& message, mongocxx::collection users) {
+void auth(ClientSession& client, std::string& message) {
   //TODO: Достать логин и пароль
   // Сверить пароль и логин с теми что хранятся в базе данных
   // Если подходит, то ставим статус client.auth_status = true
   AuthMessage auth_data = MessageService::from_string<AuthMessage>(message);
-  std::string current_password = get_password_by_username_from_db(auth_data.get_login(), users);
+  // std::string current_password = get_password_by_username_from_db(auth_data.get_login(), users);
   if (!current_password.empty()) {
     std::cout << "Have such user in db\n";
     if (auth_data.get_password().size() != current_password.size()) {
@@ -214,9 +219,22 @@ void auth_(ClientSession& client, std::string& message, mongocxx::collection use
   } else {
     std::cout << "Bad Auth request(" << message.size() << " bytes): \n" << message << std::endl;
   }
-
 }
-
+std::string get_password_by_username_from_db(const std::string& username, mongocxx::collection users) {
+  bsoncxx::builder::stream::document filter_builder;
+  filter_builder << "username" << username;
+  auto result = users.find_one(filter_builder.view());
+  
+  if (result) {
+    auto view = result->view();
+    auto it = view.find("password_hash");
+    if (it != view.end()) {
+      std::string password = static_cast<std::string>(it->get_string().value);
+      return password;
+    }
+  }
+  return "";
+}
 
 bool chat_(ClientSession& client, std::string& message, std::string& message_to_broadcast) {
   if (client.auth_status) {
@@ -237,25 +255,22 @@ int main(void) {
   //     take_args(); // scanf();
   // }
 
-  mongocxx::instance instance{};
-  mongocxx::client client{mongocxx::uri{"mongodb://root:example@localhost:27017"}};
-  auto db = client["chat_db"];
-  auto users = db["users"];
 
   Server server;
-  server.start_listen(9090);
+  if ((server.to_listen(9090)) < 0) {
+    exit(EXIT_FAILURE);
+  }
   int serv_fd = server.get_fd();
-  ChatHistory chat;
+  mongocxx::instance instance{};
+  int epoll_fd = epoll_create1(0);
 
-  int epoll_fd;
   struct epoll_event event, ev_list[MAX_EVENTS];
 
-  epoll_fd = epoll_create1(0);
   event.events = EPOLLIN;
   event.data.fd = serv_fd;
   epoll_ctl(epoll_fd, EPOLL_CTL_ADD, serv_fd, &event);
 
-  std::unordered_map<int, ClientSession> clients_pool;
+  ClientPoll clients_pool;
 
   while (true) {
     int ready_fd = epoll_wait(epoll_fd, ev_list, MAX_EVENTS, -1);
@@ -269,7 +284,7 @@ int main(void) {
         }
         
         cout << "connected: " << new_sock << "\n";
-        clients_pool.emplace(new_sock, ClientSession{"", false});
+        clients_pool.emplace(new_sock, ClientSession{new_sock});
         event.events = EPOLLIN | EPOLLET;
         event.data.fd = new_sock;
         epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_sock, &event);
@@ -278,42 +293,16 @@ int main(void) {
         int fd = ev_list[i].data.fd;
         cout << "client session: " << fd << "\n";        
         auto client = clients_pool.find(fd);
-        if (client != clients_pool.end()) {          
-          std::vector<uint8_t> bytes_headers = read_from_fd(client->first, 8);
-          std::cout << "byte size: " << bytes_headers.size() << " msgHead size: " << sizeof(MsgHeader) << std::endl;
-          if (bytes_headers.size() > 0 && bytes_headers.size() != sizeof(MsgHeader)) {
-            perror("failed read headers");
-            continue;
-          }
-          if (bytes_headers.size() <= 0) {
+        if (client != clients_pool.end()) {
+          int status = server.handle_client(client->second, clients_pool);
+          if (status == -1) {
             cout << "disconnect client\n";
             epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client->first, &event);
             clients_pool.erase(client->first);
-            close(fd);       
-          } else {           
-            MsgHeader headers = demarshaling_header(bytes_headers);
-            std::vector<uint8_t> bytes_message = read_from_fd(client->first, headers.len);
-            std::string message = demarshaling_string(bytes_message);
-            std::string message_to_broadcast;
-
-            switch (headers.type) {
-              case MsgType::Reg:
-                reg_(client->second, message, users);
-                break;
-
-              case MsgType::Auth:
-                auth_(client->second, message, users);
-                break;
-              
-              case MsgType::Chat:
-                if (chat_(client->second, message, message_to_broadcast)) {
-                  broadcast_message(client->first, clients_pool, message_to_broadcast);
-                } else {
-                  cout << "not auth\n";
-                }
-                break;              
-              default:break;
-            }
+            close(fd);
+          } else if (status > 0){
+            perror("failed handle client");
+            close(fd);
           }
         }
       }
