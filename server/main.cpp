@@ -195,13 +195,12 @@ class User {
 
 public:
   User() = default;
-  ClientSession add_user(const std::string& username, const std::string& password) {
+  bool add_user(const std::string& username, const std::string& password) {
     
     mongocxx::database db = MongoManager::get_instance().get_database();
     mongocxx::collection users = db["users"];
     bsoncxx::builder::stream::document filter_builder;
     
-    ClientSession new_client;
     filter_builder << "username" << username;
     auto result = users.find_one(filter_builder.view());
     if (!result) {
@@ -211,15 +210,13 @@ public:
       << "created_at" << bsoncxx::types::b_date{std::chrono::system_clock::now()};
       auto result = users.insert_one(user_builder.view());
       if (result) {
-        new_client.auth_status = true;
-        new_client.name = username;
-        return new_client;
+        return true;
       }
       std::cerr << "Error insert document to db" << std::endl;
       
-      return new_client;
+      return false;
     } else {
-      return new_client;
+      return false;
     }
   }
   
@@ -228,7 +225,11 @@ public:
 bool reg(ClientSession& client, const std::string& message) {
   AuthMessage auth_data = MessageService::from_string<AuthMessage>(message);
   User user;
-  client = user.add_user(auth_data.get_login(), auth_data.get_password());
+  if(user.add_user(auth_data.get_login(), auth_data.get_password())) {
+    client.auth_status = true;
+    client.name = auth_data.get_login();
+  }
+  
   return client.auth_status;
 }
 
@@ -255,6 +256,7 @@ void auth(ClientSession& client, std::string& message) {
     std::cout << "Bad Auth request(" << message.size() << " bytes): \n" << message << std::endl;
   }
 }
+
 std::string get_password_by_username_from_db(const std::string& username, mongocxx::collection users) {
   bsoncxx::builder::stream::document filter_builder;
   filter_builder << "username" << username;
