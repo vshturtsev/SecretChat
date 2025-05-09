@@ -19,28 +19,11 @@ struct MsgHeader {
   uint32_t len;
 };
 
-std::vector<uint8_t> marshaling(MsgHeader& headers) {
-  uint32_t net_type = htonl(static_cast<uint32_t>(headers.type));
-  uint32_t net_len = htonl(headers.len);
-  std::vector<uint8_t> bytes;
-  bytes.insert(bytes.end(), reinterpret_cast<uint8_t *>(&headers.type),
-                            reinterpret_cast<uint8_t *>(&headers.type) + sizeof(headers.type));
+std::vector<uint8_t> marshaling(MsgHeader &headers);
 
-  bytes.insert(bytes.end(), reinterpret_cast<uint8_t *>(&headers.len),
-               reinterpret_cast<uint8_t *>(&headers.len) + sizeof(headers.len));
-  return bytes;
-}
+MsgHeader demarshaling_header(std::vector<uint8_t> &bytes);
 
-MsgHeader demarshaling_header(std::vector<uint8_t>& bytes) {
-  MsgHeader headers = {};
-  memcpy(&headers.type, bytes.data(), sizeof(headers.type));
-  memcpy(&headers.len, bytes.data() + sizeof(headers.type), sizeof(headers.len));
-  return headers;
-}
-
-std::string demarshaling_string(std::vector<uint8_t>& bytes) {
-  return std::string(bytes.begin(), bytes.end());
-}
+std::string demarshaling_string(std::vector<uint8_t> &bytes); 
 
 class AuthMessage {
 protected:
@@ -93,13 +76,7 @@ public:
   const std::string &get_sender_name() const { return sender_name; }
   void set_sender_name(std::string name) { sender_name = name; }
 
-  std::ostringstream get_display_view() {
-    std::ostringstream oss;
-    oss << sender_name << " "
-        << std::put_time(std::localtime(&msg_time), "%Y-%m-%d %H:%M:%S:\n")
-        << content;// << std::endl;
-    return oss;
-  }
+  std::ostringstream get_display_view();
 };
 
 namespace MessageService {

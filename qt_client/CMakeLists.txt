@@ -16,7 +16,16 @@ find_package(QT NAMES Qt6 Qt5 COMPONENTS Widgets Core REQUIRED)
 find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Widgets Core REQUIRED)
 # find_package(Qt6 COMPONENTS Widgets REQUIRED)
 
-set(SOURCES_ClientApp 
+
+# set(COMMON_SOURCES 
+#     ../common/message_data.cpp  # .cpp файл
+#     ../common/message_data.hpp  # .hpp файл
+# )
+include_directories(../common)
+
+
+set(SOURCES_ClientApp
+        ../common/message_data.cpp
         main.cpp
         src/ChatListService.cpp  
         src/ChatListView.cpp  
@@ -27,6 +36,7 @@ set(SOURCES_ClientApp
 )
 
 set(HEADERS_ClientApp
+        ../common/message_data.hpp
         include/ChatListService.hpp  
         include/ChatListView.hpp  
         include/ChatService.hpp  
