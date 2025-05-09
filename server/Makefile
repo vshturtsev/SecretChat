@@ -11,9 +11,12 @@ all: main
 client: ../client/src/main.cpp
 	$(CC) $^ -o $(BIN_DIR)/client
 
-main: main.cpp
-	# $(CC) $^ -o $(BIN_DIR)/server
+main: common.o main.cpp 
+# $(CC) $^ -o $(BIN_DIR)/server
 	$(CC) $^ $(DATAFLAGS) -o server $(DATALIB)
+
+common.o: ../common/message_data.cpp ../common/message_data.hpp
+	$(CC) -c $< -o $@ $(CFLAGS)
 
 $(OBJ_DIR)/%.o: %.cpp
 	$(CC) -c -o $@ $< $(CFLAGS)

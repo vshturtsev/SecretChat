@@ -29,9 +29,9 @@
 // }
 
 int main(int argc, char *argv[]) {
-//   Client cli;
-//   int fd = cli.run();
-int fd =1000; //TEST
+  Client cli;
+  int fd = cli.run();
+// int fd =1000; //TEST
   if (fd < 0) {
     perror("socket failed");
     exit(EXIT_FAILURE);
