@@ -192,7 +192,20 @@ public:
 };
   
 class User {
-
+  
+  std::optional<bsoncxx::document::value> get_user_from_db(const std::string& username) {
+    mongocxx::database db = MongoManager::get_instance().get_database();
+    mongocxx::collection users = db["users"];
+    bsoncxx::builder::stream::document user_object;
+    user_object << "username" << username;
+    auto result = users.find_one(user_object.view());
+    if (result) {
+      bsoncxx::document::value copy_object_user = bsoncxx::document::value(result->view());
+      return copy_object_user;
+    }
+    return std::nullopt;
+  }
+  
 public:
   User() = default;
   bool add_user(const std::string& username, const std::string& password) {
@@ -219,6 +232,23 @@ public:
       return false;
     }
   }
+
+  bool compare_user(const std::string& username, const std::string& password) {
+    std::optional<bsoncxx::document::value> user_object = get_user_from_db(username);
+    if (!user_object) {
+      return false;
+    }
+    auto view = user_object->view();
+    auto it = view.find("password_hash");
+    if (it == view.end()) {
+      return false;
+    }
+    std::string current_password = static_cast<std::string>(it->get_string().value);
+    if (strcmp(password.data(), current_password.data())) {
+      return false;
+    }
+    return true;
+  }
   
 };
 
@@ -235,42 +265,15 @@ bool reg(ClientSession& client, const std::string& message) {
 
 void auth(ClientSession& client, std::string& message) {
   AuthMessage auth_data = MessageService::from_string<AuthMessage>(message);
-  // std::string current_password = get_password_by_username_from_db(auth_data.get_login(), users);
-  if (!current_password.empty()) {
-    std::cout << "Have such user in db\n";
-    if (auth_data.get_password().size() != current_password.size()) {
-      std::cout << "Incorrect password\n";
-      return;
-    }
-    if (strcmp(auth_data.get_password().data(), current_password.data())) {
-      std::cout << "Incorrect password\n";
-      return;
-
-    } else {
-      client.auth_status = true;
-      client.name = auth_data.get_login();
-      std::cout << "Good Auth request(" << message.size() << " bytes): \n" << message << "From: " << client.name << std::endl;
-    }
-
-  } else {
-    std::cout << "Bad Auth request(" << message.size() << " bytes): \n" << message << std::endl;
-  }
-}
-
-std::string get_password_by_username_from_db(const std::string& username, mongocxx::collection users) {
-  bsoncxx::builder::stream::document filter_builder;
-  filter_builder << "username" << username;
-  auto result = users.find_one(filter_builder.view());
+  User user;  
   
-  if (result) {
-    auto view = result->view();
-    auto it = view.find("password_hash");
-    if (it != view.end()) {
-      std::string password = static_cast<std::string>(it->get_string().value);
-      return password;
-    }
+  if (user.compare_user(auth_data.get_login(), auth_data.get_password())) {
+    client.auth_status = true;
+    client.name = auth_data.get_login();
+    std::cout << "Good Auth request (" << message.size() << " bytes): \n" << message << "From: " << client.name << std::endl;
+  } else {
+    std::cout << "Bad auth request (" << message.size() << " bytes): \n" << message << "From: " << client.name << std::endl;
   }
-  return "";
 }
 
 bool chat_(ClientSession& client, std::string& message, std::string& message_to_broadcast) {
