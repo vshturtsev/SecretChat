@@ -6,24 +6,37 @@
 #include <arpa/inet.h>
 
 using json = nlohmann::json;
+using bytes = std::vector<uint8_t>;
 
-enum class MsgType {
+enum class ReqType : uint8_t {
   Auth, // authentification
   Chat, // message to chat
   Reg,  // registration, first time
   Ping  //?need this? check connection
 };
 
-struct MsgHeader {
-  MsgType type;
-  uint32_t len;
+struct Request {
+
+  std::string body;
+  ReqType type;
+  Request() = default;
+  Request(ReqType type, std::string&& body) :
+    type(type), body(body)
+    {}
+  bytes marshaling() {
+    bytes data;
+    data.push_back(static_cast<uint8_t>(type));
+    data.insert(data.end(), body.begin(), body.end());
+    return data;
+  }
+  int demarshaling(bytes&& data) {
+    if (data.size() < 1) return -1;
+    type = static_cast<ReqType>(*data.begin());
+    body.insert(body.end(), (data.begin() + sizeof(type)), data.end());
+    return 0;
+  }
 };
 
-std::vector<uint8_t> marshaling(MsgHeader &headers);
-
-MsgHeader demarshaling_header(std::vector<uint8_t> &bytes);
-
-std::string demarshaling_string(std::vector<uint8_t> &bytes); 
 
 class AuthMessage {
 protected:
@@ -42,7 +55,7 @@ public:
 
 class Message {
 protected:
-  MsgType type;
+  ReqType type;
   std::string content;
   time_t msg_time;
 
@@ -50,11 +63,11 @@ public:
   NLOHMANN_DEFINE_TYPE_INTRUSIVE(Message, type, content, msg_time);
   Message() = default;
   // Message(Message&&) = default; 
-  Message(MsgType _type, std::string _content)
+  Message(ReqType _type, std::string _content)
       : type(_type), content(_content) {
     time(&msg_time);
   }
-  const MsgType &get_type() const { return type; }
+  const ReqType &get_type() const { return type; }
   const std::string &get_content() const { return content; }
   const time_t &get_time() const { return msg_time; }
   void update_time() {
@@ -66,7 +79,7 @@ class ChatMessage : public Message {
 protected:
   std::string sender_name;
 
-public:
+public: 
   NLOHMANN_DEFINE_TYPE_INTRUSIVE(ChatMessage, type, content, msg_time, sender_name);
   ChatMessage() = default;
   ChatMessage(Message &&base_msg) : Message(std::move(base_msg)) {}
@@ -80,7 +93,7 @@ public:
 };
 
 namespace MessageService {
-template <typename T> std::string to_string(const T &msg) {
+template <typename T> std::string to_string(const T &&msg) {
   std::string json_str = json(msg).dump();
   return json_str;
 }
@@ -96,8 +109,4 @@ template <typename T> T from_string(const std::string &str) {
 // std::string encode(const std::string &str) {}
 
 // std::string decode(const std::string &str) {}
-}
-
-namespace Auth {
-
 }

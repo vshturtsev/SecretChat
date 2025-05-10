@@ -12,6 +12,7 @@
 
 // #include <sys/time.h>
 #include "../../common/message_data.hpp"
+#include "../../common/socket.hpp"
 #include <unistd.h>
 
 using json = nlohmann::json;
@@ -62,55 +63,23 @@ class Client {
         }
         return fd;
     }
-    int authentication(std::string& username, std::string& user_password, int fd, MsgType type) {
-        std::string login = username;
-        std::string password = user_password;
+    int authentication(std::string& username, std::string& password, int fd, ReqType type) {
 
-        AuthMessage auth_message(login, user_password);
-        std::string json_message = MessageService::to_string(auth_message);
-        
-        MsgHeader headers = {
-            .type = type,
-            .len = static_cast<uint32_t>(json_message.size())
-        };
-        std::cout << "message: " << json_message.size() << "\n";
-        std::vector<uint8_t> bytes_headers = marshaling(headers);
-        ssize_t sent = send(fd, bytes_headers.data(), bytes_headers.size(), 0);
-        if (sent < 0) {
-            perror("failed send headers to server");
-            return -1;
-        }
-        
-        int status = send_message(fd, json_message);
+        AuthMessage auth_message(username, password);
+        std::string json_data = MessageService::to_string(std::move(auth_message));
+        Request request(type, std::move(json_data));
+        bytes data = request.marshaling();
+        std::cout << "message: " << json_data.size() << "\n";
+        int status = SocketService::send_all(fd, data);
         return status;
     }
     int send_chat(int fd, std::string& message) {
-        Message message_chat (MsgType::Chat, message);
-        std::string json_message =  MessageService::to_string(message_chat);
-        
-        MsgHeader headers = {
-            .type = message_chat.get_type(),
-            .len = static_cast<uint32_t>(json_message.size())
-        };
-
-        std::vector<uint8_t> bytes_headers = marshaling(headers);
-        
-        ssize_t sent = send(fd, bytes_headers.data(), bytes_headers.size(), 0);
-        int status = send_message(fd, json_message);
+        Message chat_message (ReqType::Chat, message);
+        std::string json_data =  MessageService::to_string(std::move(chat_message));
+        Request request(ReqType::Chat, std::move(json_data));
+        bytes data = request.marshaling();
+        int status = SocketService::send_all(fd, data);
         return status;
-    }
-    int send_message(int fd, std::string& message) {
-        ssize_t sent = send(fd, message.data(), message.size(), MSG_NOSIGNAL);
-        std::cout << "From client size message: " << sent << std::endl;
-        if (sent < 0) {
-            if (errno == EPIPE) {
-                std::cout << "server disconnect: send" << '\n';
-                return 0;
-            }
-            perror("faild send to server");
-            return -1;
-        }
-        return 1;
     }
     void read_broadcast(int fd) {
         std::string buffer;
@@ -125,6 +94,7 @@ class Client {
                 return;
             }
             if (receive < 0) {
+                connected = false;
                 perror("failed read to server");
                 return;
             }
@@ -145,7 +115,7 @@ public:
         std::getline(std::cin, username);
         std::getline(std::cin, password);
 
-        if (authentication(username, password, write_fd, MsgType::Reg) < 0) return;
+        if (authentication(username, password, write_fd, ReqType::Reg) < 0) return;
         int read_fd = dup(write_fd);
         std::thread t([&,this]{ read_broadcast(read_fd); });
         std::string msg;

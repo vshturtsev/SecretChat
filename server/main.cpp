@@ -27,6 +27,7 @@
 // DataBase includes end
 
 #include "../common/message_data.hpp"
+#include "../common/socket.hpp"
 
 // class MessageData;
 
@@ -36,20 +37,79 @@ using json = nlohmann::json;
 using ChatHistory = std::list<Message>;
 using std::cout;
 
-constexpr int BACKLOG = 10;
-constexpr int MAX_EVENTS = 10;
-
-using ClientPoll = std::unordered_map<int, ClientSession>;
-
 class ClientSession {
   
- public:
-  ClientSession() = default;
-  ClientSession(int _fd) : fd(_fd) {}
-  const int fd = 0;
-  std::string name;
-  bool auth_status = false;
-};
+  public:
+   ClientSession() = default;
+   ClientSession(int _fd) : fd(_fd) {}
+   const int fd = 0;
+   std::string name;
+   bool auth_status = false;
+ };
+ 
+using ClientPoll = std::unordered_map<int, ClientSession>;
+
+constexpr int BACKLOG = 10;
+constexpr int MAX_EVENTS = 10;
+void broadcast_message(int autor_fd, const ClientPoll clients_pool, const std::string message) {
+  // std::cout << "broadcast: " << message << std::endl;
+  for (const auto &[fd, client_session] : clients_pool) {
+    if (fd != autor_fd && client_session.auth_status) {
+      if (send(fd, message.data(), message.size(), 0) < 0) {
+        perror("Error send message.");
+      }
+    }
+  }
+}
+
+bool registration(ClientSession& client, const std::string& message) {
+  // AuthMessage auth_data = MessageService::from_string<AuthMessage>(message);
+  // User user;
+  // if(user.add_user(auth_data.get_login(), auth_data.get_password())) {
+  //   client.auth_status = true;
+  //   client.name = auth_data.get_login();
+  // }
+  client.auth_status = true;
+  return client.auth_status;
+}
+
+void authorization(ClientSession& client, std::string& message) {
+  client.auth_status = true;
+  AuthMessage auth_data = MessageService::from_string<AuthMessage>(message);
+  // std::string current_password = get_password_by_username_from_db(auth_data.get_login(), users);
+  // if (!current_password.empty()) {
+  //   std::cout << "Have such user in db\n";
+  //   if (auth_data.get_password().size() != current_password.size()) {
+  //     std::cout << "Incorrect password\n";
+  //     return;
+  //   }
+  //   if (strcmp(auth_data.get_password().data(), current_password.data())) {
+  //     std::cout << "Incorrect password\n";
+  //     return;
+
+  //   } else {
+  //     client.auth_status = true;
+  //     client.name = auth_data.get_login();
+  //     std::cout << "Good Auth request(" << message.size() << " bytes): \n" << message << "From: " << client.name << std::endl;
+  //   }
+
+  // } else {
+  //   std::cout << "Bad Auth request(" << message.size() << " bytes): \n" << message << std::endl;
+  // }
+}
+
+
+bool chat_(ClientSession& client, std::string& message, std::string& message_to_broadcast) {
+  if (client.auth_status) {
+    cout << "Received request(" << message.size() << " bytes): \n" << message << std::endl;
+    Message restore_msg = MessageService::from_string<Message>(message);
+    ChatMessage chat_msg(std::move(restore_msg), client.name);
+    chat_msg.update_time();
+    message_to_broadcast = MessageService::to_string(std::move(chat_msg));
+    return true;
+  } 
+  return false;
+}
 
 
 class Server {
@@ -65,50 +125,27 @@ class Server {
   }
   ~Server() { close(fd); }
 
-  std::vector<uint8_t> read_from_fd(const int fd, ssize_t length) {
-    std::vector<uint8_t> bytes;
-    std::vector<uint8_t> buffer;
-    buffer.resize(2);
-    ssize_t recived_bytes{};
-
-    while (length > 0) {
-      recived_bytes = recv(fd, buffer.data(), buffer.size(), 0);
-      if (recived_bytes <= 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK || recived_bytes == 0) {
-          break;
-        }
-        bytes.clear();
-        break;
-      }
-      length -= recived_bytes;
-      bytes.insert(bytes.end(), buffer.begin(), buffer.begin() + recived_bytes);
-    }
-    return bytes;
-  }
-
   int handle_client(ClientSession& client_session, ClientPoll& clients_pool) {
-    std::vector<uint8_t> bytes_headers = read_from_fd(client_session.fd, 8);
-    std::cout << "byte size: " << bytes_headers.size() << " msgHead size: " << sizeof(MsgHeader) << std::endl;
-    if (bytes_headers.size() > 0 && bytes_headers.size() != sizeof(MsgHeader))
+    byte data = SocketService::recv_all(client_session.fd);
+    std::cout << "data size: " << data.size() << '\n';
+    if (data.size() <= 0) {
       return -1;
-
-    if (bytes_headers.size() <= 0) {
-      return 0;
     }
-    MsgHeader headers = demarshaling_header(bytes_headers);
-    std::vector<uint8_t> bytes_message = read_from_fd(client_session.fd, headers.len);
-    std::string message = demarshaling_string(bytes_message);
+    Request response;
+    response.demarshaling(std::move(data));
+
     std::string message_to_broadcast;
-    switch (headers.type) {
-      case MsgType::Reg:
-        reg(client_session, message);
+    switch (response.type) {
+      case ReqType::Reg:
+        registration(client_session, response.body);
         break;
-      case MsgType::Auth:
-        auth(client_session, message);
+      case ReqType::Auth:
+        authorization(client_session, response.body);
         break;
       
-      case MsgType::Chat:
-        if (chat_(client_session, message, message_to_broadcast)) {
+      case ReqType::Chat:
+        std::cout << "message: " << response.body << " size: " << response.body.size() << "\n\n";
+        if (chat_(client_session, response.body, message_to_broadcast)) {
           broadcast_message(client_session.fd, clients_pool, message_to_broadcast);
         } else {
           cout << "not auth\n";
@@ -116,7 +153,7 @@ class Server {
         break;              
       default:break;
     }
-    return 1;
+    return 0;
   }
 
   int to_listen(uint16_t port) {
@@ -142,33 +179,20 @@ class Server {
   }
   int get_fd(void) const { return fd; }
 
-};
-
-void broadcast_message(int autor_fd, ClientPoll clients_pool, std::string message) {
-  // std::cout << "broadcast: " << message << std::endl;
-  for (const auto &[fd, client_session] : clients_pool) {
-    if (fd != autor_fd && client_session.auth_status) {
-      if (send(fd, message.data(), message.size(), 0) < 0) {
-        perror("Error send message.");
-      }
+  int accept(sockaddr *addr, socklen_t *addr_len) {
+    int connect_fd = ::accept(fd, addr, addr_len);
+    if (connect_fd < 0) {
+      std::cerr << "failed connection socket accept\n";
     }
-  }
-}
-
-bool turn_on_nonblock(int fd) {
-  int flags = fcntl(fd, F_GETFL);
-  if (flags == -1) {
-    return false;
-  }
-  
-  flags |= O_NONBLOCK;
-  if (fcntl(fd, F_SETFL, flags) == -1) {
-    return false;
+    if (connect_fd > 0 && SocketService::turn_on_nonblock(connect_fd) < 0) {
+      std::cerr << "failed nonblock socket\n";
+      close(connect_fd);
+      connect_fd = -1;
+    }
+    return connect_fd;
   }
 
-  return true;
-}
-
+};
 
 class MongoManager {
 private:
@@ -313,12 +337,18 @@ int main(void) {
 
   while (true) {
     int ready_fd = epoll_wait(epoll_fd, ev_list, MAX_EVENTS, -1);
+    if (ready_fd < 0) {
+      if (errno == EINTR)
+        continue;
+      
+      perror("failed epoll_wait");
+      break;
+    }
     cout << "client ready: " << ready_fd << "\n";
     for (int i = 0; i < ready_fd; i++) {
       if (ev_list[i].data.fd == serv_fd) {
-        int new_sock = accept(server.get_fd(), nullptr, nullptr);
-        if (!turn_on_nonblock(new_sock)) {
-          close(new_sock);
+        int new_sock = server.accept(nullptr, nullptr);
+        if (new_sock < 0) {
           continue;
         }
         
@@ -328,7 +358,7 @@ int main(void) {
         event.data.fd = new_sock;
         epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_sock, &event);
 
-      } else {
+      } else if (ev_list[i].events & EPOLLIN) { // событие поступления данных
         int fd = ev_list[i].data.fd;
         cout << "client session: " << fd << "\n";        
         auto client = clients_pool.find(fd);
@@ -344,6 +374,10 @@ int main(void) {
             close(fd);
           }
         }
+      } else if (ev_list[i].events & (EPOLLRDHUP | EPOLLERR | EPOLLHUP)) {  // закрытие удаленного сокета либо ошибка 
+        std::cerr << "failed events\n";
+        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, ev_list[i].data.fd, &event);
+        close(ev_list[i].data.fd);
       }
     }
   }
