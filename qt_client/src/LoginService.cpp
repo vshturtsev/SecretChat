@@ -15,7 +15,7 @@ int LoginService::authentication (std::string& username, std::string& user_passw
   AuthMessage auth_message(username, user_password);
   std::string json_data = MessageService::to_string(std::move(auth_message));
   Request request(type, std::move(json_data));
-  std::cout << "request(type = " << static_cast<uint8_t>(request.type) << "):" << json_data << std::endl; //TEST
+  std::cout << "request(type = " << static_cast<int>(request.type) << "):" << json_data << std::endl; //TEST
 
   bytes data = request.marshaling();  
   int status = SocketService::send_all(fd, data);

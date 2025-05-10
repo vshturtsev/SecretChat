@@ -1,21 +1,21 @@
+#include <fcntl.h> // For nonBlock
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
-#include <fcntl.h> // For nonBlock
 
 #include <chrono>
 #include <cstring>
 #include <iostream>
 #include <list>
+#include <nlohmann/json.hpp>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
-#include <nlohmann/json.hpp>
-#include <thread>
 
 #include "message_data.hpp"
 #include "socket.hpp"
@@ -30,7 +30,7 @@ constexpr int MAX_EVENTS = 10;
 class Server {
   int fd;
 
- public:
+public:
   Server() {
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
@@ -60,7 +60,7 @@ class Server {
     }
     return bytes;
   }
-  
+
   int to_listen(uint16_t port) {
     struct sockaddr_in srv_addr = {};
     srv_addr.sin_addr.s_addr = INADDR_ANY;
@@ -69,10 +69,12 @@ class Server {
     int opt = 1;
     int status = 0;
 
-    if (!status && (status = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) < 0) {
+    if (!status && (status = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt,
+                                        sizeof(opt))) < 0) {
       perror("setcokopt(SO_REUSEADDR) failed");
     }
-    if (!status && (status = bind(fd, (struct sockaddr *)&srv_addr, sizeof(srv_addr))) < 0) {
+    if (!status && (status = bind(fd, (struct sockaddr *)&srv_addr,
+                                  sizeof(srv_addr))) < 0) {
       perror("Binding failed.");
     }
     if (!status && (status = listen(fd, BACKLOG)) < 0) {
@@ -84,21 +86,19 @@ class Server {
   }
   int get_fd(void) const { return fd; }
 
+  int accept(sockaddr *addr, socklen_t *addr_len) {
+    int connect_fd = ::accept(fd, addr, addr_len);
+    if (connect_fd < 0) {
+      std::cerr << "failed connection socket accept\n";
+    }
+    if (connect_fd > 0 && SocketService::turn_on_nonblock(connect_fd) < 0) {
+      std::cerr << "failed nonblock socket\n";
+      close(connect_fd);
+      connect_fd = -1;
+    }
+    return connect_fd;
+  }
 };
-
-bool turn_on_nonblock(int fd) {
-  int flags = fcntl(fd, F_GETFL);
-  if (flags == -1) {
-    return false;
-  }
-  
-  flags |= O_NONBLOCK;
-  if (fcntl(fd, F_SETFL, flags) == -1) {
-    return false;
-  }
-
-  return true;
-}
 
 int main(void) {
   Server server;
@@ -106,30 +106,59 @@ int main(void) {
     exit(EXIT_FAILURE);
   }
   int serv_fd = server.get_fd();
+  int epoll_fd = epoll_create1(0);
+  struct epoll_event event, ev_list[MAX_EVENTS];
 
-  while (true) { 
-  int client_fd = accept(server.get_fd(), nullptr, nullptr);
-  if (client_fd > -1)
-  std::cout << "Connection accept" << std::endl ;
-  if (!turn_on_nonblock(client_fd)) {
-    close(client_fd);
-    fprintf (stderr, "failed turn_nonblock");
-    exit(EXIT_FAILURE);
-  }
+  event.events = EPOLLIN;
+  event.data.fd = serv_fd;
+  epoll_ctl(epoll_fd, EPOLL_CTL_ADD, serv_fd, &event);
+
   while (true) {
-    byte data = SocketService::recv_all(client_fd);
-    std::cout << "data: ";
-    for (auto b : data) {
-      std::cout << b ;
+    int ready_fd = epoll_wait(epoll_fd, ev_list, MAX_EVENTS, -1);
+    if (ready_fd < 0) {
+      if (errno == EINTR)
+        continue;
+
+      perror("failed epoll_wait");
+      break;
     }
-    std::cout << std::endl;
+    cout << "client ready: " << ready_fd << "\n";
 
-    Request response;
-    response.demarshaling(std::move(data));
+    for (int i = 0; i < ready_fd; i++) {
+      if (ev_list[i].data.fd == serv_fd) {
+        int new_sock = server.accept(nullptr, nullptr);
+        if (new_sock < 0) {
+          continue;
+        }
+        cout << "connected: " << new_sock << "\n";
+        event.events = EPOLLIN | EPOLLET;
+        event.data.fd = new_sock;
+        epoll_ctl(epoll_fd, EPOLL_CTL_ADD, new_sock, &event);
 
-    std::cout << "request(type = " << static_cast<uint8_t> (response.type) << "):" << response.body << std::endl; //TEST
-    
+      } else if (ev_list[i].events & EPOLLIN) { // событие поступления данных
+        int fd = ev_list[i].data.fd;
+        cout << "client session: " << fd << "\n";
+        byte data = SocketService::recv_all(fd);
+        // std::cout << "data: ";
+        // for (auto b : data) {
+        //   std::cout << b;
+        // }
+        // std::cout << std::endl;
+
+        Request response;
+        response.demarshaling(std::move(data));
+
+        std::cout << "request(type = " << static_cast<int>(response.type)
+                  << "):" << response.body << std::endl; // TEST
+
+      } else if (ev_list[i].events &
+                 (EPOLLRDHUP | EPOLLERR |
+                  EPOLLHUP)) { // закрытие удаленного сокета либо ошибка
+        std::cerr << "failed events\n";
+        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, ev_list[i].data.fd, &event);
+        close(ev_list[i].data.fd);
+      }
+    }
   }
-}
   return 0;
 }

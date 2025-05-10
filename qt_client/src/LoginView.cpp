@@ -12,8 +12,12 @@
 LoginView::LoginView(LoginService *service, QWidget *parent)
     : QDialog(parent), l_service(service) {
   resize(QSize(200, 100));
+
   login_edit = new QLineEdit();
+  login_edit->setPlaceholderText("Введите логин...");
   password_edit = new QLineEdit();
+  password_edit->setPlaceholderText("Введите пароль...");
+  password_edit->setEchoMode(QLineEdit::Password);
   remember_check = new QCheckBox("Запомнить данные");
   login_button = new QPushButton("Вход");
   register_button = new QPushButton("Регистрация");
@@ -45,7 +49,7 @@ void LoginView::on_login_button_clicked() {
   std::string username = login_edit->text().toStdString();
   std::string password = password_edit->text().toStdString();
   if (username.size() >= 3 && password.size() >= 3 ) 
-  l_service->authentication(username, password, ReqType::Reg);
+  l_service->authentication(username, password, ReqType::Auth);
   else 
     qDebug() << "Неправильно заполнены логин или пароль";
 

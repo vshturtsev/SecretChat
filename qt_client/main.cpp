@@ -15,9 +15,9 @@
 #include <iostream>
 #include <string>
 
-#include "message_data.hpp"
 #include "LoginService.hpp"
 #include "LoginView.hpp"
+#include "message_data.hpp"
 #include "qt_client.hpp"
 
 // QPushButton *btn = nullptr;
@@ -31,7 +31,7 @@
 int main(int argc, char *argv[]) {
   Client cli;
   int fd = cli.run();
-// int fd =1000; //TEST
+  // int fd =1000; //TEST
   if (fd < 0) {
     perror("socket failed");
     exit(EXIT_FAILURE);
