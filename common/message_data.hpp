@@ -23,18 +23,8 @@ struct Request {
   Request(ReqType type, std::string&& body) :
     type(type), body(body)
     {}
-  bytes marshaling() {
-    bytes data;
-    data.push_back(static_cast<uint8_t>(type));
-    data.insert(data.end(), body.begin(), body.end());
-    return data;
-  }
-  int demarshaling(bytes&& data) {
-    if (data.size() < 1) return -1;
-    type = static_cast<ReqType>(*data.begin());
-    body.insert(body.end(), (data.begin() + sizeof(type)), data.end());
-    return 0;
-  }
+  bytes marshaling();
+  int demarshaling(bytes&& data);
 };
 
 

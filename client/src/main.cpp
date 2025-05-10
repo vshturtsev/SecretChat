@@ -1,21 +1,14 @@
-#include <sys/socket.h>
-#include <string_view>
 #include <system_error>
-#include <arpa/inet.h>
-#include <sys/socket.h>
 #include <optional>
 #include <iostream>
-#include <nlohmann/json.hpp>
 #include <cstring>
 #include <thread>
 #include <atomic>
 
-// #include <sys/time.h>
 #include "../../common/message_data.hpp"
 #include "../../common/socket.hpp"
-#include <unistd.h>
 
-using json = nlohmann::json;
+// using json = nlohmann::json;
 using std::cout;
 #define USER_ID 123456  // get by cl
 
