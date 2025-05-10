@@ -10,7 +10,7 @@ public:
   explicit LoginService(int _fd, QObject *parent = nullptr);
   ~LoginService();
 
-  int authentication(std::string& username, std::string& user_password, MsgType type); 
+  int authentication(std::string& username, std::string& user_password, ReqType type); 
   int send_message(std::string& message); 
 
 signals:

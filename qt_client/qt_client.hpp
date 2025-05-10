@@ -61,57 +61,9 @@ class Client {
     return fd;
   }
 
-  int authentication(int fd) {
-    std::string login = "vova";
-    std::string password = "true";
-    Message message(MsgType::Auth, login + ":" + password);
-
-    std::string json_message = MessageService::to_string(message);
-
-    const MsgHeader headers = {.type = message.get_type(),
-                               .len =
-                                   static_cast<uint32_t>(json_message.size())};
-
-    cout << headers.len << " " << sizeof(headers) << "\n";
-    ssize_t sent = send(fd, &headers, sizeof(headers), 0);
-    if (sent != sizeof(headers)) {
-      perror("failed send headers");
-    }
-    int status = send_message(json_message);
-    return status;
-  }
 
 public:
-  int send_chat(std::string &message) const {
-    Message message_chat(MsgType::Chat, message);
-    std::string json_message = MessageService::to_string(message_chat);
 
-    const MsgHeader headers = {.type = message_chat.get_type(),
-                               .len =
-                                   static_cast<uint32_t>(json_message.size())};
-
-    cout << headers.len << " " << sizeof(headers) << "\n";
-    ssize_t sent = send(fd, &headers, sizeof(headers), 0);
-    if (sent != sizeof(headers)) {
-      perror("failed send headers");
-    }
-    int status = send_message(json_message);
-    return status;
-  }
-  int send_message(std::string &message) const {
-    if (!connected)
-      return 0;
-    ssize_t sent = send(fd, message.data(), message.size(), MSG_NOSIGNAL);
-    if (sent < 0) {
-      if (errno == EPIPE) {
-        std::cout << "server disconnect: send" << '\n';
-        return 0;
-      }
-      perror("faild send to server");
-      return -1;
-    }
-    return 1;
-  }
   void read_broadcast(int fd) {
     std::string buffer;
     buffer.resize(1024);

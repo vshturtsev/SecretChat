@@ -1,5 +1,6 @@
 #include "LoginService.hpp"
-#include "../common/message_data.hpp"
+#include "message_data.hpp"
+#include "socket.hpp"
 
 #include <nlohmann/json.hpp>
 #include <iostream>
@@ -10,32 +11,20 @@ LoginService::LoginService (int _fd, QObject *parent) : QObject(parent), fd(_fd)
 
 LoginService::~LoginService() {}
 
-int LoginService::authentication (std::string& username, std::string& user_password, MsgType type) {
-  std::string login = username;
-  std::string password = user_password;
+int LoginService::authentication (std::string& username, std::string& user_password, ReqType type) {
+  AuthMessage auth_message(username, user_password);
+  std::string json_data = MessageService::to_string(std::move(auth_message));
+  Request request(type, std::move(json_data));
+  std::cout << "request(type = " << static_cast<uint8_t>(request.type) << "):" << json_data << std::endl; //TEST
 
-  AuthMessage auth_message(login, user_password);
-  std::string json_message = MessageService::to_string(auth_message);
-  
-  MsgHeader headers = {
-      .type = type,
-      .len = static_cast<uint32_t>(json_message.size())
-  };
-  std::cout << "message: " << json_message.size() << "\n";
-  std::vector<uint8_t> bytes_headers = marshaling(headers);
-  // return 0; //Test
-  ssize_t sent = send(fd, bytes_headers.data(), bytes_headers.size(), 0);
-  if (sent < 0) {
-      perror("failed send headers to server");
-      return -1;
-  }
-  
-  int status = send_message(json_message);
+  bytes data = request.marshaling();  
+  int status = SocketService::send_all(fd, data);
+  std::cout << "sended: " << status << std::endl;
   return status;
 }
 
 int LoginService::send_message(std::string& message) {
-  // std::cout << message << std::endl;
+  std::cout << "send_message: " << message << std::endl;
   // return 0;
   ssize_t sent = send(fd, message.data(), message.size(), MSG_NOSIGNAL);
   std::cout << "From client size message: " << sent << std::endl;

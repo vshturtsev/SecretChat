@@ -42,11 +42,21 @@ LoginView::LoginView(LoginService *service, QWidget *parent)
 LoginView::~LoginView() {}
 
 void LoginView::on_login_button_clicked() {
+  std::string username = login_edit->text().toStdString();
+  std::string password = password_edit->text().toStdString();
+  if (username.size() >= 3 && password.size() >= 3 ) 
+  l_service->authentication(username, password, ReqType::Reg);
+  else 
+    qDebug() << "Неправильно заполнены логин или пароль";
 
 }
+
 void LoginView::on_register_button_clicked() {
   std::string username = login_edit->text().toStdString();
   std::string password = password_edit->text().toStdString();
-  l_service->authentication(username, password, MsgType::Reg);
+  if (username.size() >= 3 && password.size() >= 3 ) 
+  l_service->authentication(username, password, ReqType::Reg);
+  else 
+    qDebug() << "Неправильно заполнены логин или пароль";
 
 }

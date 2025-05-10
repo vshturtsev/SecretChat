@@ -23,9 +23,9 @@ find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Widgets Core REQUIRED)
 # )
 include_directories(../common)
 
-
 set(SOURCES_ClientApp
         ../common/message_data.cpp
+        ../common/socket.cpp
         main.cpp
         src/ChatListService.cpp  
         src/ChatListView.cpp  
@@ -36,6 +36,7 @@ set(SOURCES_ClientApp
 )
 
 set(HEADERS_ClientApp
+        ../common/socket.hpp
         ../common/message_data.hpp
         include/ChatListService.hpp  
         include/ChatListView.hpp  
@@ -44,6 +45,21 @@ set(HEADERS_ClientApp
         include/LoginService.hpp  
         include/LoginView.hpp
 )
+
+#TestServer build, to run server and client: bash run.sh
+file(COPY run.sh DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+set(SOURCES_TestServer 
+        ../common/message_data.cpp   
+        ../common/socket.cpp
+        test_server.cpp     
+) 
+
+set(HEADERS_TestServer
+        ../common/message_data.hpp
+        ../common/socket.hpp
+)
+
+add_executable(TestServer ${SOURCES_TestServer} ${HEADERS_TestServer})
 
 add_executable(ClientApp ${SOURCES_ClientApp} ${HEADERS_ClientApp})
 
